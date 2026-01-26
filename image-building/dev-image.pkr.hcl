@@ -89,7 +89,7 @@ source "azure-arm" "dev_image" {
     image_name          = "avd-dev-image"
     image_version       = var.image_version
     replication_regions = ["West Europe", "East US"]
-    storage_account_type = "Premium_LRS"
+    storage_account_type = "Standard_LRS"
   }
 
   # Build configuration

@@ -38,7 +38,7 @@ variable "virtual_network_id" {
 variable "acr_sku" {
   description = "SKU for Azure Container Registry"
   type        = string
-  default     = "Premium"
+  default     = "Standard"
   
   validation {
     condition     = contains(["Basic", "Standard", "Premium"], var.acr_sku)

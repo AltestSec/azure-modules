@@ -235,8 +235,8 @@ module "shared_image_gallery" {
   subnet_id                  = azurerm_subnet.avd_hosts_eu.id
   private_endpoint_subnet_id = azurerm_subnet.private_endpoints_eu.id
   virtual_network_id         = azurerm_virtual_network.avd_eu.id
-  acr_sku                    = "Premium"
-  image_retention_days       = 90
+  acr_sku                    = "Standard"
+  image_retention_days       = 60
   allowed_ip_ranges          = var.allowed_ip_ranges
   tags                       = local.common_tags
 }

@@ -52,7 +52,7 @@ variable "admin_password" {
 variable "os_disk_type" {
   description = "Type of OS disk"
   type        = string
-  default     = "Premium_LRS"
+  default     = "Standart_LRS"
 }
 
 variable "os_disk_size_gb" {
