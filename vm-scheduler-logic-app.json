@@ -1,0 +1,129 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "resourceGroupName": {
+      "type": "string",
+      "defaultValue": "rg-playground"
+    },
+    "subscriptionId": {
+      "type": "string"
+    }
+  },
+  "triggers": {
+    "Recurrence": {
+      "recurrence": {
+        "frequency": "Hour",
+        "interval": 1,
+        "timeZone": "Central European Standard Time"
+      },
+      "type": "Recurrence"
+    }
+  },
+  "actions": {
+    "Check_Current_Time": {
+      "type": "Compose",
+      "inputs": {
+        "currentHour": "@formatDateTime(utcNow(), 'HH')",
+        "currentDay": "@formatDateTime(utcNow(), 'dddd')",
+        "currentDate": "@formatDateTime(utcNow(), 'yyyy-MM-dd')"
+      }
+    },
+    "Check_If_Holiday": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "https://date.nager.at/api/v3/PublicHolidays/@{formatDateTime(utcNow(), 'yyyy')}/HU"
+      },
+      "runAfter": {
+        "Check_Current_Time": ["Succeeded"]
+      }
+    },
+    "Determine_VM_Action": {
+      "type": "If",
+      "expression": {
+        "or": [
+          {
+            "equals": [
+              "@outputs('Check_Current_Time')['currentDay']",
+              "Saturday"
+            ]
+          },
+          {
+            "equals": [
+              "@outputs('Check_Current_Time')['currentDay']",
+              "Sunday"
+            ]
+          },
+          {
+            "less": [
+              "@int(outputs('Check_Current_Time')['currentHour'])",
+              9
+            ]
+          },
+          {
+            "greater": [
+              "@int(outputs('Check_Current_Time')['currentHour'])",
+              18
+            ]
+          },
+          {
+            "contains": [
+              "@string(body('Check_If_Holiday'))",
+              "@outputs('Check_Current_Time')['currentDate']"
+            ]
+          }
+        ]
+      },
+      "actions": {
+        "Stop_VMs": {
+          "type": "Http",
+          "inputs": {
+            "method": "POST",
+            "uri": "https://management.azure.com/subscriptions/@{parameters('subscriptionId')}/resourceGroups/@{parameters('resourceGroupName')}/providers/Microsoft.Compute/virtualMachines/vm-@{variables('poolType')}-1/deallocate?api-version=2023-03-01",
+            "headers": {
+              "Authorization": "Bearer @{body('Get_Access_Token')['access_token']}"
+            }
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "Start_VMs": {
+            "type": "Http",
+            "inputs": {
+              "method": "POST",
+              "uri": "https://management.azure.com/subscriptions/@{parameters('subscriptionId')}/resourceGroups/@{parameters('resourceGroupName')}/providers/Microsoft.Compute/virtualMachines/vm-@{variables('poolType')}-1/start?api-version=2023-03-01",
+              "headers": {
+                "Authorization": "Bearer @{body('Get_Access_Token')['access_token']}"
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Check_If_Holiday": ["Succeeded"]
+      }
+    },
+    "Get_Access_Token": {
+      "type": "Http",
+      "inputs": {
+        "method": "POST",
+        "uri": "https://login.microsoftonline.com/@{parameters('tenantId')}/oauth2/token",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "body": "grant_type=client_credentials&client_id=@{parameters('clientId')}&client_secret=@{parameters('clientSecret')}&resource=https://management.azure.com/"
+      },
+      "runAfter": {
+        "Check_Current_Time": ["Succeeded"]
+      }
+    }
+  },
+  "variables": {
+    "poolType": {
+      "type": "string",
+      "value": "web"
+    }
+  }
+}

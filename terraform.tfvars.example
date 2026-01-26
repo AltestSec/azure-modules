@@ -1,0 +1,27 @@
+# Example Terraform variables file
+# Copy this to terraform.tfvars and update with your values
+
+subscription_id = "your-azure-subscription-id"
+tenant_id      = "your-azure-tenant-id"
+
+# Infrastructure settings
+resource_group_name = "rg-playground"
+location           = "West Europe"
+environment        = "dev"
+
+# VM Configuration
+pool_type = "web"  # Options: web, api, worker
+vm_count  = 2      # Number of VMs to create
+vm_size   = "Standard_B2s"
+
+# Auto-shutdown settings
+auto_shutdown_enabled = true
+work_hours_start     = "09:00"
+work_hours_end       = "18:00"
+timezone            = "Central European Standard Time"
+
+# AVD-specific Configuration
+dev_vm_size        = "Standard_B2als_v2"  # ARM-based, cost-effective for development
+mgmt_vm_size       = "Standard_B2als_v2"  # ARM-based, suitable for management tasks
+primary_location   = "West Europe"        # Primary region for EU resources
+secondary_location = "East US"            # Secondary region for US resources

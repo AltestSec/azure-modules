@@ -1,0 +1,73 @@
+# Azure Virtual Desktop Infrastructure Configuration
+# Copy this file to terraform.tfvars and update with your values
+
+# Azure Authentication
+subscription_id = "your-azure-subscription-id"
+tenant_id      = "your-azure-tenant-id"
+
+# General Configuration
+environment = "dev"  # Options: dev, staging, prod
+cost_center = "IT-Infrastructure"
+owner       = "AVD-Team"
+
+# VM Size Configuration
+dev_vm_size  = "Standard_B2als_v2"  # AMD EPYC-based, cost-effective for development (2 vCPU, 4 GB RAM)
+mgmt_vm_size = "Standard_B2als_v2"  # AMD EPYC-based, suitable for management tasks (2 vCPU, 4 GB RAM)
+
+# Location Configuration
+primary_location   = "West Europe"  # Primary region for EU resources
+secondary_location = "East US"      # Secondary region for US resources
+
+# Pool Size Configuration
+dev_pool_size_eu  = 4  # EU Development pool size (1-20)
+dev_pool_size_us  = 6  # US Development pool size (1-20)
+mgmt_pool_size_us = 3  # US Management pool size (1-10)
+
+# AVD Authentication Configuration
+avd_admin_username = "avdadmin"
+avd_admin_password = "YourSecurePassword123!"  # Use Azure Key Vault in production
+
+# Authentication Method (choose one)
+use_aad_join = true  # Recommended: Use Azure AD join
+
+# Domain Join Configuration (alternative to AAD join)
+domain_join_enabled  = false
+domain_name         = ""  # e.g., "contoso.local"
+domain_join_username = ""  # e.g., "domain\\admin"
+domain_join_password = ""  # Use Azure Key Vault in production
+
+# Auto-shutdown Configuration
+auto_shutdown_enabled = true
+
+# Image Building Configuration
+enable_image_building = true
+image_build_schedule  = "0 2 * * 0"  # Every Sunday at 2 AM
+
+# Security Configuration
+enable_security_scanning    = true
+enable_compliance_monitoring = true
+allowed_ip_ranges           = "0.0.0.0/0"  # Restrict in production
+
+# Monitoring Configuration
+enable_advanced_monitoring = true
+log_retention_days         = 90
+
+# Backup Configuration
+enable_backup         = true
+backup_retention_days = 30
+
+# Network Configuration (optional - will use defaults if not specified)
+# vnet_address_space_eu = ["10.1.0.0/16"]
+# vnet_address_space_us = ["10.2.0.0/16"]
+# subnet_address_prefix_eu = "10.1.1.0/24"
+# subnet_address_prefix_us = "10.2.1.0/24"
+
+# Tags (optional - additional tags beyond defaults)
+# additional_tags = {
+#   "Department" = "Engineering"
+#   "Project"    = "AVD-Migration"
+#   "Contact"    = "admin@company.com"
+# }
+
+# Note: README documentation still shows Standard_D8s_v3 as an example,
+# but actual infrastructure uses the more cost-effective B2als_v2 AMD EPYC-based VMs

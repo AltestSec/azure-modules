@@ -1,0 +1,78 @@
+# variables:
+#   TF_WORKING_DIR: 'infra'
+#   # Subscription IDs per environment – not secret, but you can still hide them as secret vars if desired
+#   dev_subscription_id:  '00000000-0000-0000-0000-000000000001'
+#   prod_subscription_id: '00000000-0000-0000-0000-000000000002'
+
+trigger:
+- None
+  # branches:
+  #   include:
+  #     - '*'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  TF_WORKING_DIR: 'infra'     # path to your terraform code root
+
+stages:
+- stage: Deploy
+  jobs:
+  - job: Terraform
+    steps:
+    # 1. Log in to Azure using service connection
+    - task: AzureCLI@2
+      displayName: 'Azure login (service connection)'
+      inputs:
+        azureSubscription: 'My-Service-Connection-Name'  # name of your service connection
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # show current subscription - for debug only
+          az account show --output table
+          SUB_ID=$(az account show --query id -o tsv)
+          echo "##vso[task.setvariable variable=subscription_id;isOutput=true]$SUB_ID"
+      name: GetSub
+
+    #2. Get secret from Key Vault  
+    - task: AzureKeyVault@2
+      inputs:
+        azureSubscription: 'My-Service-Connection-Name'
+        KeyVaultName: 'my-kv'
+        SecretsFilter: 'tf-client-secret'
+        RunAsPreJob: true
+
+    - script: |
+        cd $(TF_WORKING_DIR)
+        export TF_VAR_client_secret='$(tf-client-secret)'
+        terraform plan
+      displayName: 'Terraform plan with secret from KV'
+
+    # 3. Install Terraform (or use Terraform task instead)
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: '1.9.0'
+
+    # 4. Terraform Init
+    - script: |
+        cd $(TF_WORKING_DIR)
+         export TF_VAR_subscription_id='$(dev_subscription_id)'  # or pick by stage
+        terraform init
+      displayName: 'Terraform init'
+
+    # 5. Terraform Plan
+    - script: |
+        cd $(TF_WORKING_DIR)
+         export TF_VAR_subscription_id='$(dev_subscription_id)'  # or pick by stage
+        terraform plan -out=tfplan
+      displayName: 'Terraform plan'
+
+    # 6. Terraform Apply (optional, usually gated by approval)
+    - script: |
+        cd $(TF_WORKING_DIR)
+        #terraform apply -auto-approve tfplan
+      displayName: 'Terraform apply'
+      #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+      condition: and(succeeded(), eq(variables['Build.SourceBranch'])

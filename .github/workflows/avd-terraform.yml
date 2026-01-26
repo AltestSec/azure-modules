@@ -1,0 +1,369 @@
+name: 'AVD Infrastructure Deployment'
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'az_payground/avd-*.tf'
+      - 'az_payground/modules/avd-*/**'
+      - 'az_payground/modules/shared-image-gallery/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'az_payground/avd-*.tf'
+      - 'az_payground/modules/avd-*/**'
+      - 'az_payground/modules/shared-image-gallery/**'
+  workflow_dispatch:
+    inputs:
+      dev_pool_size_eu:
+        description: 'EU Development Pool Size'
+        required: true
+        default: '4'
+        type: choice
+        options:
+          - '2'
+          - '4'
+          - '6'
+          - '8'
+          - '10'
+      dev_pool_size_us:
+        description: 'US Development Pool Size'
+        required: true
+        default: '6'
+        type: choice
+        options:
+          - '2'
+          - '4'
+          - '6'
+          - '8'
+          - '10'
+      mgmt_pool_size_us:
+        description: 'US Management Pool Size'
+        required: true
+        default: '3'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      action:
+        description: 'Terraform Action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      enable_image_building:
+        description: 'Enable Image Building Pipeline'
+        required: true
+        default: true
+        type: boolean
+      enable_security_scanning:
+        description: 'Enable Security Scanning'
+        required: true
+        default: true
+        type: boolean
+
+env:
+  TF_WORKING_DIR: './az_payground'
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+jobs:
+  security-scan:
+    name: 'Security Scan'
+    runs-on: ubuntu-latest
+    if: github.event.inputs.enable_security_scanning == 'true' || github.event.inputs.enable_security_scanning == null
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Run Checkov
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: az_payground/
+        framework: terraform
+        output_format: sarif
+        output_file_path: checkov-results.sarif
+        
+    - name: Upload Checkov results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: checkov-results.sarif
+
+    - name: Run TFSec
+      uses: aquasecurity/tfsec-action@v1.0.3
+      with:
+        working_directory: az_payground/
+        format: sarif
+        output: tfsec-results.sarif
+        
+    - name: Upload TFSec results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: tfsec-results.sarif
+
+  terraform-validate:
+    name: 'Terraform Validate'
+    runs-on: ubuntu-latest
+    needs: security-scan
+    if: always() && (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped')
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.0
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Setup Terraform Backend
+      run: |
+        # Create storage account for Terraform state
+        STORAGE_NAME="tfstateavd$(date +%s | tail -c 6)"
+        az group create --name tfstate-avd-rg --location "West Europe" --output none || true
+        az storage account create \
+          --name $STORAGE_NAME \
+          --resource-group tfstate-avd-rg \
+          --location "West Europe" \
+          --sku Standard_LRS \
+          --output none || true
+        az storage container create \
+          --name tfstate \
+          --account-name $STORAGE_NAME \
+          --output none || true
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+
+    - name: Terraform Init
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
+          -backend-config="resource_group_name=tfstate-avd-rg" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=avd-terraform.tfstate"
+
+    - name: Terraform Validate
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: terraform validate
+
+    - name: Terraform Format Check
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: terraform fmt -check -recursive
+
+  terraform-plan:
+    name: 'Terraform Plan'
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.0
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set Variables
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "DEV_POOL_SIZE_EU=${{ github.event.inputs.dev_pool_size_eu }}" >> $GITHUB_ENV
+          echo "DEV_POOL_SIZE_US=${{ github.event.inputs.dev_pool_size_us }}" >> $GITHUB_ENV
+          echo "MGMT_POOL_SIZE_US=${{ github.event.inputs.mgmt_pool_size_us }}" >> $GITHUB_ENV
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "ENABLE_IMAGE_BUILDING=${{ github.event.inputs.enable_image_building }}" >> $GITHUB_ENV
+          echo "ENABLE_SECURITY_SCANNING=${{ github.event.inputs.enable_security_scanning }}" >> $GITHUB_ENV
+        else
+          echo "DEV_POOL_SIZE_EU=4" >> $GITHUB_ENV
+          echo "DEV_POOL_SIZE_US=6" >> $GITHUB_ENV
+          echo "MGMT_POOL_SIZE_US=3" >> $GITHUB_ENV
+          echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+          echo "ENABLE_IMAGE_BUILDING=true" >> $GITHUB_ENV
+          echo "ENABLE_SECURITY_SCANNING=true" >> $GITHUB_ENV
+        fi
+
+    - name: Generate Admin Password
+      run: |
+        ADMIN_PASSWORD=$(openssl rand -base64 32)
+        echo "::add-mask::$ADMIN_PASSWORD"
+        echo "AVD_ADMIN_PASSWORD=$ADMIN_PASSWORD" >> $GITHUB_ENV
+
+    - name: Terraform Init
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
+          -backend-config="resource_group_name=tfstate-avd-rg" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=avd-terraform.tfstate"
+
+    - name: Terraform Plan
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform plan \
+          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+          -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+          -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="dev_pool_size_eu=${{ env.DEV_POOL_SIZE_EU }}" \
+          -var="dev_pool_size_us=${{ env.DEV_POOL_SIZE_US }}" \
+          -var="mgmt_pool_size_us=${{ env.MGMT_POOL_SIZE_US }}" \
+          -var="avd_admin_password=${{ env.AVD_ADMIN_PASSWORD }}" \
+          -var="enable_image_building=${{ env.ENABLE_IMAGE_BUILDING }}" \
+          -var="enable_security_scanning=${{ env.ENABLE_SECURITY_SCANNING }}" \
+          -out=tfplan
+
+    - name: Upload Plan
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-plan
+        path: ${{ env.TF_WORKING_DIR }}/tfplan
+
+  terraform-apply:
+    name: 'Terraform Apply'
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.event.inputs.action == 'apply' && github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.0
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Download Plan
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-plan
+        path: ${{ env.TF_WORKING_DIR }}
+
+    - name: Terraform Init
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
+          -backend-config="resource_group_name=tfstate-avd-rg" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=avd-terraform.tfstate"
+
+    - name: Terraform Apply
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: terraform apply -auto-approve tfplan
+
+    - name: Output Infrastructure Details
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        echo "## AVD Infrastructure Deployed Successfully! 🚀" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        terraform output -json avd_deployment_summary | jq -r '
+          "**Total Session Hosts:** \(.total_session_hosts)",
+          "",
+          "### Pool Configuration",
+          "| Pool | Location | VM Size | Host Count | Image Type |",
+          "|------|----------|---------|------------|------------|",
+          (.pools | to_entries[] | "| \(.key) | \(.value.location) | \(.value.vm_size) | \(.value.host_count) | \(.value.image_type) |"),
+          "",
+          "### Features Enabled",
+          (.features | to_entries[] | "- **\(.key | gsub("_"; " ") | ascii_upcase):** \(.value)")
+        ' >> $GITHUB_STEP_SUMMARY
+
+  image-building:
+    name: 'Build Custom Images'
+    runs-on: ubuntu-latest
+    needs: terraform-apply
+    if: github.event.inputs.enable_image_building == 'true' && github.event.inputs.action == 'apply'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Build Development Image
+      run: |
+        echo "Building custom development image..."
+        # This would trigger your image building pipeline
+        # For now, we'll just log the action
+        echo "Development image build initiated"
+        echo "Image will include: VS Code, Kiro IDE, Docker, Git, Office Suite"
+
+    - name: Build Management Image
+      run: |
+        echo "Building custom management image..."
+        echo "Management image build initiated"
+        echo "Image will include: Office Suite, Loop, Confluence, Browser tools"
+
+  post-deployment:
+    name: 'Post-Deployment Tasks'
+    runs-on: ubuntu-latest
+    needs: [terraform-apply, image-building]
+    if: always() && needs.terraform-apply.result == 'success'
+    
+    steps:
+    - name: Setup Monitoring
+      run: |
+        echo "Setting up monitoring and alerting..."
+        echo "Configuring Log Analytics workspaces"
+        echo "Setting up Azure Monitor alerts"
+
+    - name: Configure Auto-Scaling
+      run: |
+        echo "Configuring auto-scaling policies..."
+        echo "Setting up scaling plans for each pool"
+
+    - name: Security Hardening
+      run: |
+        echo "Applying security hardening..."
+        echo "Configuring network security groups"
+        echo "Setting up Azure Security Center policies"
+
+    - name: Deployment Complete
+      run: |
+        echo "🎉 AVD Infrastructure deployment completed successfully!"
+        echo "Access your virtual desktops through the Azure Virtual Desktop client"

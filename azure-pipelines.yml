@@ -1,0 +1,213 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - az_payground/**
+
+parameters:
+  - name: pool_type
+    displayName: 'VM Pool Type'
+    type: string
+    default: 'web'
+    values:
+      - web
+      - api
+      - worker
+  
+  - name: vm_count
+    displayName: 'Number of VMs'
+    type: number
+    default: 2
+    values:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+  
+  - name: vm_size
+    displayName: 'VM Size'
+    type: string
+    default: 'Standard_B2als_v2'
+    values:
+      - Standard_B1s
+      - Standard_B2s
+      - Standard_B2als_v2
+      - Standard_D2s_v3
+      - Standard_D4s_v3
+  
+  - name: environment
+    displayName: 'Environment'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - staging
+      - prod
+  
+  - name: action
+    displayName: 'Action'
+    type: string
+    default: 'plan'
+    values:
+      - plan
+      - apply
+      - destroy
+
+variables:
+  TF_WORKING_DIR: 'az_payground'
+  ARM_USE_MSI: true
+  ARM_SUBSCRIPTION_ID: $(subscription_id)
+  ARM_TENANT_ID: $(tenant_id)
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+- stage: Validate
+  displayName: 'Terraform Validate'
+  jobs:
+  - job: Validate
+    displayName: 'Validate Terraform'
+    steps:
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: '1.7.0'
+
+    - task: AzureCLI@2
+      displayName: 'Setup Terraform Backend'
+      inputs:
+        azureSubscription: '$(service_connection_name)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Create storage account for Terraform state if it doesn't exist
+          az group create --name tfstate-rg --location "West Europe" --output none
+          az storage account create \
+            --name tfstatestorage$(Build.BuildId) \
+            --resource-group tfstate-rg \
+            --location "West Europe" \
+            --sku Standard_LRS \
+            --output none
+          az storage container create \
+            --name tfstate \
+            --account-name tfstatestorage$(Build.BuildId) \
+            --output none
+
+    - script: |
+        cd $(TF_WORKING_DIR)
+        terraform init \
+          -backend-config="storage_account_name=tfstatestorage$(Build.BuildId)" \
+          -backend-config="resource_group_name=tfstate-rg"
+        terraform validate
+        terraform fmt -check
+      displayName: 'Terraform Init and Validate'
+      env:
+        TF_VAR_subscription_id: $(subscription_id)
+        TF_VAR_tenant_id: $(tenant_id)
+        TF_VAR_pool_type: ${{ parameters.pool_type }}
+        TF_VAR_vm_count: ${{ parameters.vm_count }}
+        TF_VAR_vm_size: ${{ parameters.vm_size }}
+        TF_VAR_environment: ${{ parameters.environment }}
+
+- stage: Plan
+  displayName: 'Terraform Plan'
+  dependsOn: Validate
+  condition: succeeded()
+  jobs:
+  - job: Plan
+    displayName: 'Plan Infrastructure'
+    steps:
+    - task: TerraformInstaller@1
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: '1.7.0'
+
+    - script: |
+        cd $(TF_WORKING_DIR)
+        terraform init \
+          -backend-config="storage_account_name=tfstatestorage$(Build.BuildId)" \
+          -backend-config="resource_group_name=tfstate-rg"
+        terraform plan \
+          -var="pool_type=${{ parameters.pool_type }}" \
+          -var="vm_count=${{ parameters.vm_count }}" \
+          -var="vm_size=${{ parameters.vm_size }}" \
+          -var="environment=${{ parameters.environment }}" \
+          -out=tfplan
+      displayName: 'Terraform Plan'
+      env:
+        TF_VAR_subscription_id: $(subscription_id)
+        TF_VAR_tenant_id: $(tenant_id)
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Plan'
+      inputs:
+        targetPath: '$(TF_WORKING_DIR)/tfplan'
+        artifact: 'terraform-plan'
+
+- stage: Apply
+  displayName: 'Terraform Apply'
+  dependsOn: Plan
+  condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
+  jobs:
+  - deployment: Apply
+    displayName: 'Apply Infrastructure'
+    environment: '${{ parameters.environment }}'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: '1.7.0'
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Plan'
+            inputs:
+              artifactName: 'terraform-plan'
+              downloadPath: '$(TF_WORKING_DIR)'
+
+          - script: |
+              cd $(TF_WORKING_DIR)
+              terraform init \
+                -backend-config="storage_account_name=tfstatestorage$(Build.BuildId)" \
+                -backend-config="resource_group_name=tfstate-rg"
+              terraform apply -auto-approve tfplan
+            displayName: 'Terraform Apply'
+            env:
+              TF_VAR_subscription_id: $(subscription_id)
+              TF_VAR_tenant_id: $(tenant_id)
+
+- stage: ScheduleShutdown
+  displayName: 'Setup VM Scheduling'
+  dependsOn: Apply
+  condition: and(succeeded(), eq('${{ parameters.action }}', 'apply'))
+  jobs:
+  - job: SetupScheduling
+    displayName: 'Configure VM Auto-Shutdown'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Setup VM Scheduling'
+      inputs:
+        azureSubscription: '$(service_connection_name)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Get Hungarian holidays and setup advanced scheduling
+          RG_NAME="rg-playground"
+          
+          # Create Logic App for advanced scheduling (weekends, holidays, work hours)
+          az logic workflow create \
+            --resource-group $RG_NAME \
+            --name "vm-scheduler-${{ parameters.environment }}" \
+            --location "West Europe" \
+            --definition @vm-scheduler-logic-app.json
+          
+          echo "VM scheduling configured for environment: ${{ parameters.environment }}"
+          echo "Pool type: ${{ parameters.pool_type }}"
+          echo "VM count: ${{ parameters.vm_count }}"
