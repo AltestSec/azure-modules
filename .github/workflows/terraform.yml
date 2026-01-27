@@ -119,28 +119,80 @@ jobs:
 
     - name: Setup SSH Key
       run: |
-        # GitHub Actions SSH key management (simplified)
-        # Priority: 1) GitHub Secrets, 2) Generate temporary key
+        # GitHub Actions SSH key management with Azure Key Vault fallback
+        # Priority: 1) GitHub Secrets, 2) Azure Key Vault, 3) Generate and store in Key Vault
         
         if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
           echo "✅ Using SSH key from GitHub Secrets"
           echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          
+          # Validate SSH key format
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
         else
-          echo "🔧 GitHub Secret VM_SSH_PUBLIC_KEY not found, generating temporary SSH key..."
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, checking Azure Key Vault..."
           
-          # Generate temporary SSH key for this workflow run
-          ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-temp-$(date +%Y%m%d-%H%M)"
-          PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
+          # Set resource prefix from input or default
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          else
+            RESOURCE_PREFIX="omerzlikin"
+          fi
           
-          echo "⚠️  Using temporary SSH key (will be lost after workflow)"
-          echo "💡 To persist SSH key, add your public key to GitHub Secrets as VM_SSH_PUBLIC_KEY"
-          echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
-        fi
-        
-        # Validate SSH key format
-        if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
-          echo "❌ Invalid SSH public key format"
-          exit 1
+          # Try to get existing key from Azure Key Vault
+          KV_NAME="${RESOURCE_PREFIX}-kv"
+          RG_NAME="${RESOURCE_PREFIX}-rg-playground"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Using existing SSH key from Azure Key Vault: $KV_NAME"
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
+            
+            # Generate SSH key
+            ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-github-$(date +%Y%m%d-%H%M)"
+            PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
+            
+            # Create resource group if it doesn't exist
+            az group create \
+              --name "$RG_NAME" \
+              --location "West Europe" \
+              --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=playground \
+              --output none || true
+            
+            # Create Key Vault if it doesn't exist
+            az keyvault create \
+              --name "$KV_NAME" \
+              --resource-group "$RG_NAME" \
+              --location "West Europe" \
+              --sku standard \
+              --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
+              --output none || true
+            
+            # Store in Azure Key Vault for future runs
+            az keyvault secret set \
+              --vault-name "$KV_NAME" \
+              --name "vm-ssh-public-key" \
+              --value "$PUBLIC_KEY" \
+              --description "SSH public key for Terraform-managed VMs (GitHub Actions)" \
+              --output none
+            
+            echo "✅ SSH key generated and stored in Key Vault: $KV_NAME"
+            echo "💡 For faster access, add this key to GitHub Secrets as VM_SSH_PUBLIC_KEY:"
+            echo "$PUBLIC_KEY"
+            echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
+          fi
+          
+          # Validate SSH key format
+          if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format"
+            exit 1
+          fi
         fi
         
         echo "🔑 SSH key configured successfully"
