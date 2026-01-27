@@ -95,6 +95,8 @@ env:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   terraform-validate:
@@ -173,9 +175,11 @@ jobs:
         # Assign Storage Blob Data Contributor role for RBAC access
         SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
         az role assignment create \
-          --assignee "${SP_OBJ_ID}" \
+          --assignee-object-id "${SP_OBJ_ID}" \
           --role "Storage Blob Data Contributor" \
-          --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
+          --assignee-principal-type ServicePrincipal
+          #--scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
+          --scope "$(az storage account show -g "$RG_NAME" -n "$STORAGE_NAME" --query id -o tsv)" \
           --output none || true
 
         sleep 300
@@ -206,7 +210,7 @@ jobs:
         echo "Check container exists..."
         if ! az storage container exists \
           --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
-          --name tfstate \
+          --name "$STORAGE_NAME-${{ github.event.inputs.environment }}" \
           --auth-mode login \
           --query exists -o tsv 2>/dev/null | grep -qx true; then
           echo "Container tfstate does not exist (or no access)."
@@ -216,7 +220,7 @@ jobs:
         echo "Test blob access (AAD)..."
         az storage blob list \
           --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
-          --container-name tfstate \
+          --container-name "$STORAGE_NAME-${{ github.event.inputs.environment }}" \
           --auth-mode login \
           --num-results 1 \
           --query "[0].name" -o tsv >/dev/null
@@ -227,6 +231,8 @@ jobs:
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=${{ env.ENVIRONMENT }}/terraform.tfstate" \
           -backend-config="use_azuread_auth=true"
 
     - name: Terraform Validate
