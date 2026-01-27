@@ -63,13 +63,24 @@ on:
           - plan
           - apply
           - destroy
+      resource_prefix:
+        description: 'Resource prefix (e.g., omerzlikin-3444d253-9433)'
+        required: true
+        default: 'omerzlikin'
+        type: string
+      due_date:
+        description: 'Due date for resources (YYYY-MM-DD)'
+        required: false
+        default: '2026-02-12'
+        type: string
+      location:
+        options:
+          - eastus
+          - westeurope
+
 
 env:
-  TF_WORKING_DIR: 'az_payground'
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  TF_WORKING_DIR: ${{ github.workspace }}
 
 permissions:
   contents: read
@@ -83,33 +94,6 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Debug Workspace
-      run: |
-        echo "=== WORKSPACE DEBUG ==="
-        echo "Current directory: $(pwd)"
-        echo "GitHub Workspace: $env.GITHUB_WORKSPACE"
-        echo "Runner temp: $RUNNER_TEMP"
-        echo "Repository structure:"
-        ls -la
-        echo ""
-        echo "Looking for az_payground directory:"
-        if [ -d "az_payground" ]; then
-          echo "✅ az_payground found!"
-          echo "Contents of az_payground:"
-          ls -la az_payground/
-          echo ""
-          echo "Terraform files in az_payground:"
-          find az_payground -name "*.tf" -type f | head -10
-        else
-          echo "❌ az_payground directory not found"
-          echo "Available directories:"
-          find . -maxdepth 2 -type d | head -10
-        fi
-        echo ""
-        echo "TF_WORKING_DIR is set to: $TF_WORKING_DIR"
-        echo "Full path would be: $(pwd)/$TF_WORKING_DIR"
-        echo "======================="
-
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
@@ -122,34 +106,76 @@ jobs:
 
     - name: Setup Terraform Backend
       run: |
-        # Create storage account for Terraform state if it doesn't exist
-        az group create --name tfstate-rg --location "West Europe" --output none || true
-        STORAGE_NAME="tfstate$(date +%s)"
+        # Set resource prefix from input or default
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          DUE_DATE="${{ github.event.inputs.due_date }}"
+        else
+          RESOURCE_PREFIX="omerzlikin"
+          DUE_DATE="2026-02-12"
+        fi
+        
+        LOCATION="${{ github.event.inputs.location }}"
+        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
+        STORAGE_NAME="${RESOURCE_PREFIX}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
+        
+        echo "Creating Terraform state storage with prefix: $RESOURCE_PREFIX"
+        echo "Storage account: $STORAGE_NAME"
+        echo "Resource group: $RG_NAME"
+        echo "Due date: $DUE_DATE"
+        
+        # Create resource group for Terraform state
+        az group create --name "$RG_NAME" --location "$LOCATION" --output none || true
+        
+        # Create storage account with versioning and RBAC
         az storage account create \
-          --name $STORAGE_NAME \
-          --resource-group tfstate-rg \
-          --location "West Europe" \
+          --name "$STORAGE_NAME" \
+          --resource-group "$RG_NAME" \
+          --location "$LOCATION" \
           --sku Standard_LRS \
+          --kind StorageV2 \
+          --enable-versioning true \
+          --allow-blob-public-access false \
+          --tags owner=omerzlikin createdBy=terraform dueDate="$DUE_DATE" \
           --output none || true
+        
+        # Create container for Terraform state
         az storage container create \
           --name tfstate \
-          --account-name $STORAGE_NAME \
+          --account-name "$STORAGE_NAME" \
+          --auth-mode login \
           --output none || true
+        
+        # Get current user/service principal object ID
+        CURRENT_USER_ID=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || az account show --query user.name -o tsv)
+        
+        # Assign Storage Blob Data Contributor role for RBAC access
+        az role assignment create \
+          --assignee "$CURRENT_USER_ID" \
+          --role "Storage Blob Data Contributor" \
+          --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
+          --output none || true
+        
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
+        echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
 
     - name: Terraform Init
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=tfstate-rg"
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="use_azuread_auth=true"
 
     - name: Terraform Validate
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: terraform validate
 
     - name: Terraform Format Check
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: terraform fmt -check
 
   terraform-plan:
@@ -184,22 +210,34 @@ jobs:
           echo "VM_COUNT=${{ github.event.inputs.vm_count }}" >> $GITHUB_ENV
           echo "VM_SIZE=${{ github.event.inputs.vm_size }}" >> $GITHUB_ENV
           echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
+          echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
         else
           echo "POOL_TYPE=web" >> $GITHUB_ENV
           echo "VM_COUNT=2" >> $GITHUB_ENV
           echo "VM_SIZE=Standard_B2als_v2" >> $GITHUB_ENV
           echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+          echo "RESOURCE_PREFIX=omerzlikin" >> $GITHUB_ENV
+          echo "DUE_DATE=2026-02-12" >> $GITHUB_ENV
         fi
+        
+        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
+        STORAGE_NAME="${{ env.RESOURCE_PREFIX }}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        RG_NAME="${{ env.RESOURCE_PREFIX }}-tfstate-rg"
+        
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
 
     - name: Terraform Init
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=tfstate-rg"
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="use_azuread_auth=true"
 
     - name: Terraform Plan
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform plan \
           -var="pool_type=${{ env.POOL_TYPE }}" \
@@ -211,7 +249,7 @@ jobs:
           -out=tfplan
 
     - name: Generate Cost Estimate
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         # Generate cost breakdown for the planned infrastructure
         infracost breakdown --path . \
@@ -225,7 +263,7 @@ jobs:
           --out-file infracost-base.json
 
     - name: Generate Cost Summary
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         # Generate human-readable cost summary
         infracost output --path infracost-base.json --format table > cost-estimate.txt
@@ -234,10 +272,12 @@ jobs:
         echo "## 💰 Infrastructure Cost Estimate" >> cost-summary.md
         echo "" >> cost-summary.md
         echo "**Configuration:**" >> cost-summary.md
+        echo "- Resource Prefix: ${{ env.RESOURCE_PREFIX }}" >> cost-summary.md
         echo "- Pool Type: ${{ env.POOL_TYPE }}" >> cost-summary.md
         echo "- VM Count: ${{ env.VM_COUNT }}" >> cost-summary.md
         echo "- VM Size: ${{ env.VM_SIZE }}" >> cost-summary.md
         echo "- Environment: ${{ env.ENVIRONMENT }}" >> cost-summary.md
+        echo "- Due Date: ${{ env.DUE_DATE }}" >> cost-summary.md
         echo "" >> cost-summary.md
         echo "**Monthly Cost Breakdown:**" >> cost-summary.md
         echo '```' >> cost-summary.md
@@ -255,7 +295,7 @@ jobs:
       with:
         script: |
           const fs = require('fs');
-          const path = '${{ env.GITHUB_WORKSPACE }}/cost-summary.md';
+          const path = '${{ env.TF_WORKING_DIR }}/cost-summary.md';
           
           if (fs.existsSync(path)) {
             const costSummary = fs.readFileSync(path, 'utf8');
@@ -273,11 +313,11 @@ jobs:
       with:
         name: terraform-plan-with-costs
         path: |
-          ${{ env.GITHUB_WORKSPACE }}/tfplan
-          ${{ env.GITHUB_WORKSPACE }}/cost-estimate.txt
-          ${{ env.GITHUB_WORKSPACE }}/cost-estimate.html
-          ${{ env.GITHUB_WORKSPACE }}/infracost-base.json
-          ${{ env.GITHUB_WORKSPACE }}/cost-summary.md
+          ${{ env.TF_WORKING_DIR }}/tfplan
+          ${{ env.TF_WORKING_DIR }}/cost-estimate.txt
+          ${{ env.TF_WORKING_DIR }}/cost-estimate.html
+          ${{ env.TF_WORKING_DIR }}/infracost-base.json
+          ${{ env.TF_WORKING_DIR }}/cost-summary.md
 
   terraform-apply:
     name: 'Terraform Apply'
@@ -305,14 +345,30 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Set Variables
+      run: |
+        echo "POOL_TYPE=${{ github.event.inputs.pool_type }}" >> $GITHUB_ENV
+        echo "VM_COUNT=${{ github.event.inputs.vm_count }}" >> $GITHUB_ENV
+        echo "VM_SIZE=${{ github.event.inputs.vm_size }}" >> $GITHUB_ENV
+        echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
+        echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+        
+        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
+        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        RG_NAME="${{ github.event.inputs.resource_prefix }}-tfstate-rg"
+        
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+
     - name: Download Plan and Cost Estimates
       uses: actions/download-artifact@v4
       with:
         name: terraform-plan-with-costs
-        path: ${{ env.env.GITHUB_WORKSPACE }}
+        path: ${{ env.TF_WORKING_DIR }}
 
     - name: Display Pre-Apply Cost Estimate
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         echo "=== PRE-APPLY COST ESTIMATE ==="
         if [ -f "cost-estimate.txt" ]; then
@@ -323,21 +379,24 @@ jobs:
         echo "==============================="
 
     - name: Terraform Init
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=tfstate-rg"
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="use_azuread_auth=true"
 
     - name: Terraform Apply
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         echo "🚀 Applying infrastructure changes..."
+        echo "Resource prefix: ${{ env.RESOURCE_PREFIX }}"
+        echo "Due date: ${{ env.DUE_DATE }}"
         terraform apply -auto-approve tfplan
         echo "✅ Infrastructure deployment completed"
 
     - name: Generate Post-Apply Cost Analysis
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         # Generate current state cost analysis
         infracost breakdown --path . \
@@ -355,10 +414,12 @@ jobs:
         echo "## 🎉 Infrastructure Deployment Complete" > deployment-summary.md
         echo "" >> deployment-summary.md
         echo "**Deployed Configuration:**" >> deployment-summary.md
-        echo "- Pool Type: ${{ github.event.inputs.pool_type }}" >> deployment-summary.md
-        echo "- VM Count: ${{ github.event.inputs.vm_count }}" >> deployment-summary.md
-        echo "- VM Size: ${{ github.event.inputs.vm_size }}" >> deployment-summary.md
-        echo "- Environment: ${{ github.event.inputs.environment }}" >> deployment-summary.md
+        echo "- Resource Prefix: ${{ env.RESOURCE_PREFIX }}" >> deployment-summary.md
+        echo "- Pool Type: ${{ env.POOL_TYPE }}" >> deployment-summary.md
+        echo "- VM Count: ${{ env.VM_COUNT }}" >> deployment-summary.md
+        echo "- VM Size: ${{ env.VM_SIZE }}" >> deployment-summary.md
+        echo "- Environment: ${{ env.ENVIRONMENT }}" >> deployment-summary.md
+        echo "- Due Date: ${{ env.DUE_DATE }}" >> deployment-summary.md
         echo "" >> deployment-summary.md
         echo "**Monthly Operating Costs:**" >> deployment-summary.md
         echo '```' >> deployment-summary.md
@@ -373,31 +434,35 @@ jobs:
     - name: Setup VM Scheduling
       run: |
         # Configure advanced VM scheduling
-        RG_NAME="rg-playground"
+        RG_NAME="${{ env.RESOURCE_PREFIX }}-rg-playground"
+        LOCATION="${{ github.event.inputs.location }}"
         
         # Create Function App for Hungarian holidays and work hours scheduling
         az functionapp create \
           --resource-group $RG_NAME \
-          --consumption-plan-location "West Europe" \
+          --consumption-plan-location "$LOCATION" \
           --runtime python \
           --runtime-version 3.9 \
           --functions-version 4 \
-          --name "vm-scheduler-${{ github.event.inputs.environment }}" \
-          --storage-account "vmschedulerstorage" || echo "Function app creation skipped (may already exist)"
+          --name "${{ env.RESOURCE_PREFIX }}-vm-scheduler-${{ env.ENVIRONMENT }}" \
+          --storage-account "${{ env.RESOURCE_PREFIX }}vmschedulerstorage" \
+          --tags owner=omerzlikin createdBy=terraform dueDate="${{ env.DUE_DATE }}" \
+          || echo "Function app creation skipped (may already exist)"
         
         echo "VM scheduling configured for:"
-        echo "Environment: ${{ github.event.inputs.environment }}"
-        echo "Pool type: ${{ github.event.inputs.pool_type }}"
-        echo "VM count: ${{ github.event.inputs.vm_count }}"
+        echo "Environment: ${{ env.ENVIRONMENT }}"
+        echo "Pool type: ${{ env.POOL_TYPE }}"
+        echo "VM count: ${{ env.VM_COUNT }}"
+        echo "Resource prefix: ${{ env.RESOURCE_PREFIX }}"
 
     - name: Upload Deployment Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: deployment-results
         path: |
-          ${{ env.GITHUB_WORKSPACE }}/current-costs.txt
-          ${{ env.GITHUB_WORKSPACE }}/infracost-current.json
-          ${{ env.GITHUB_WORKSPACE }}/deployment-summary.md
+          ${{ env.TF_WORKING_DIR }}/current-costs.txt
+          ${{ env.TF_WORKING_DIR }}/infracost-current.json
+          ${{ env.TF_WORKING_DIR }}/deployment-summary.md
 
   terraform-destroy:
     name: 'Terraform Destroy'
@@ -430,16 +495,26 @@ jobs:
         echo "VM_COUNT=${{ github.event.inputs.vm_count }}" >> $GITHUB_ENV
         echo "VM_SIZE=${{ github.event.inputs.vm_size }}" >> $GITHUB_ENV
         echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
+        echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+        
+        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
+        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        RG_NAME="${{ github.event.inputs.resource_prefix }}-tfstate-rg"
+        
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
 
     - name: Terraform Init
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=tfstate-rg"
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="use_azuread_auth=true"
 
     - name: Generate Pre-Destroy Cost Analysis
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         # Show current costs before destruction
         infracost breakdown --path . \
@@ -454,9 +529,10 @@ jobs:
         echo "💰 Monthly cost savings after destroy: \$${MONTHLY_COST}"
 
     - name: Terraform Destroy
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         echo "🗑️ Destroying infrastructure..."
+        echo "Resource prefix: ${{ env.RESOURCE_PREFIX }}"
         terraform destroy -auto-approve \
           -var="pool_type=${{ env.POOL_TYPE }}" \
           -var="vm_count=${{ env.VM_COUNT }}" \
@@ -467,17 +543,19 @@ jobs:
         echo "✅ Infrastructure destruction completed"
 
     - name: Generate Destruction Summary
-      working-directory: ${{ env.GITHUB_WORKSPACE }}
+      working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         echo "## 🗑️ Infrastructure Destruction Complete" > destruction-summary.md
         echo "" >> destruction-summary.md
         echo "**Destroyed Configuration:**" >> destruction-summary.md
+        echo "- Resource Prefix: ${{ env.RESOURCE_PREFIX }}" >> destruction-summary.md
         echo "- Pool Type: ${{ env.POOL_TYPE }}" >> destruction-summary.md
         echo "- VM Count: ${{ env.VM_COUNT }}" >> destruction-summary.md
         echo "- VM Size: ${{ env.VM_SIZE }}" >> destruction-summary.md
         echo "- Environment: ${{ env.ENVIRONMENT }}" >> destruction-summary.md
+        echo "- Due Date: ${{ env.DUE_DATE }}" >> destruction-summary.md
         echo "" >> destruction-summary.md
-        echo "**Cost Savings:**" >> destruction-summary.md
+        echo "**Cost Savings:**" >> cost-summary.md
         echo '```' >> destruction-summary.md
         cat pre-destroy-costs.txt >> destruction-summary.md
         echo '```' >> destruction-summary.md
@@ -489,5 +567,5 @@ jobs:
       with:
         name: destruction-results
         path: |
-          ${{ env.GITHUB_WORKSPACE }}/pre-destroy-costs.txt
-          ${{ env.GITHUB_WORKSPACE }}/destruction-summary.md
+          ${{ env.TF_WORKING_DIR }}/pre-destroy-costs.txt
+          ${{ env.TF_WORKING_DIR }}/destruction-summary.md

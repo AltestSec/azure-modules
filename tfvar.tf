@@ -50,77 +50,8 @@ variable "pool_type" {
   }
 }
 
-variable "auto_shutdown_enabled" {
-  description = "Enable automatic shutdown for VMs"
-  type        = bool
-  default     = true
-}
-
-variable "work_hours_start" {
-  description = "Work hours start time (24h format)"
-  type        = string
-  default     = "09:00"
-}
-
-variable "work_hours_end" {
-  description = "Work hours end time (24h format)"
-  type        = string
-  default     = "18:00"
-}
-
 variable "timezone" {
   description = "Timezone for scheduling"
   type        = string
   default     = "Central European Standard Time"
-}
-
-# AVD-specific variables
-variable "dev_vm_size" {
-  description = "VM size for development session hosts"
-  type        = string
-  default     = "Standard_B2als_v2"  # 2 vCPU, 4 GB RAM, AMD EPYC-based, burstable
-  
-  validation {
-    condition = can(regex("^Standard_", var.dev_vm_size))
-    error_message = "VM size must be a valid Azure VM size starting with 'Standard_'."
-  }
-}
-
-variable "mgmt_vm_size" {
-  description = "VM size for management session hosts"
-  type        = string
-  default     = "Standard_B2als_v2"  # 2 vCPU, 4 GB RAM, AMD EPYC-based, burstable
-  
-  validation {
-    condition = can(regex("^Standard_", var.mgmt_vm_size))
-    error_message = "VM size must be a valid Azure VM size starting with 'Standard_'."
-  }
-}
-
-variable "primary_location" {
-  description = "Primary Azure region for EU resources"
-  type        = string
-  default     = "West Europe"
-  
-  validation {
-    condition = contains([
-      "West Europe", "North Europe", "UK South", "UK West",
-      "France Central", "Germany West Central", "Switzerland North"
-    ], var.primary_location)
-    error_message = "Primary location must be a valid European Azure region."
-  }
-}
-
-variable "secondary_location" {
-  description = "Secondary Azure region for US resources"
-  type        = string
-  default     = "East US"
-  
-  validation {
-    condition = contains([
-      "East US", "East US 2", "West US", "West US 2", "West US 3",
-      "Central US", "North Central US", "South Central US"
-    ], var.secondary_location)
-    error_message = "Secondary location must be a valid US Azure region."
-  }
 }
