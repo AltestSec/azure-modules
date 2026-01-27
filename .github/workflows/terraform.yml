@@ -140,7 +140,9 @@ jobs:
         az group create --name "$RG_NAME" --location "$LOCATION" --output none || true
 
         #Test for role assignment
-        az role assignment list --assignee "${env.AZURE_CLIENT_ID)" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
+        #az role assignment list --assignee "${env.AZURE_CLIENT_ID)" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
+        az role assignment list --assignee "${ARM_CLIENT_ID}" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
+
         
         # Create storage account with versioning and RBAC
         az storage account create \
@@ -161,7 +163,7 @@ jobs:
         # Create container for Terraform state
         az storage container create \
           --name tfstate \
-          --account-name "$STORAGE_NAME-${env.GITHUB_ENV}" \
+          --account-name "$STORAGE_NAME-${{ env.ENVIRONMENT }}" \
           --auth-mode login \
           --output none || true
         
@@ -177,9 +179,9 @@ jobs:
 
         echo "Setting ACL for Terraform SP..."
         az storage fs access set \
-          --account-name "$STORAGE_ACCOUNT_NAME" \
+          --account-name "$STORAGE_NAME" \
           --file-system tfstate \
-          --acl "user:${env.AZURE_CLIENT_ID}:rwx" \
+          --acl "user:$ARM_CLIENT_ID:rwx" \
           --auth-mode login
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
@@ -192,14 +194,14 @@ jobs:
         set -euo pipefail
 
         echo "Check storage account exists..."
-        if ! az storage account show -n "$STORAGE_NAME" -g "$TFSTATE_RG_NAME" --query "name" -o tsv >/dev/null 2>&1; then
-          echo "Storage account $STORAGE_NAME not found in RG $TFSTATE_RG_NAME"
+        if ! az storage account show -n "${{ env.STORAGE_ACCOUNT_NAME }}" -g "$TFSTATE_RG_NAME" --query "name" -o tsv >/dev/null 2>&1; then
+          echo "Storage account ${{ env.STORAGE_ACCOUNT_NAME }} not found in RG $TFSTATE_RG_NAME"
           exit 1
         fi
 
         echo "Check container exists..."
         if ! az storage container exists \
-          --account-name "$STORAGE_NAME" \
+          --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
           --name tfstate \
           --auth-mode login \
           --query exists -o tsv 2>/dev/null | grep -qx true; then
@@ -209,7 +211,7 @@ jobs:
 
         echo "Test blob access (AAD)..."
         az storage blob list \
-          --account-name "$STORAGE_NAME" \
+          --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
           --container-name tfstate \
           --auth-mode login \
           --num-results 1 \
@@ -219,7 +221,7 @@ jobs:
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
-          -backend-config="storage_account_name=${{ env.STORAGE_NAME }}" \
+          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
           -backend-config="use_azuread_auth=true"
 
