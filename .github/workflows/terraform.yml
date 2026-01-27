@@ -178,6 +178,8 @@ jobs:
           --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
           --output none || true
 
+        sleep 1200
+
         echo "Setting ACL for Terraform SP..."
         az storage fs access set \
           --account-name "$STORAGE_NAME" \
