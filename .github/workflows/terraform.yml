@@ -74,6 +74,10 @@ on:
         default: '2026-02-12'
         type: string
       location:
+        description: 'Azure Location'
+        required: true
+        default: 'westeurope'
+        type: choice
         options:
           - eastus
           - westeurope
@@ -135,10 +139,14 @@ jobs:
           --location "$LOCATION" \
           --sku Standard_LRS \
           --kind StorageV2 \
-          --enable-versioning true \
           --allow-blob-public-access false \
           --tags owner=omerzlikin createdBy=terraform dueDate="$DUE_DATE" \
           --output none || true
+
+        az storage account blob-service-properties update \
+          --resource-group "$RG_NAME" \
+          --account-name "$STORAGE_NAME" \
+          --enable-versioning true
         
         # Create container for Terraform state
         az storage container create \
