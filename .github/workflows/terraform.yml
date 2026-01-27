@@ -117,6 +117,68 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Setup SSH Key
+      run: |
+        # Multi-platform SSH key management
+        # Priority: 1) GitHub Secrets, 2) Azure Key Vault, 3) Generate new
+        
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, checking Azure Key Vault..."
+          
+          # Set resource prefix from input or default
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          else
+            RESOURCE_PREFIX="omerzlikin"
+          fi
+          
+          # Try to get existing key from Azure Key Vault
+          KV_NAME="${RESOURCE_PREFIX}-shared-kv"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Using existing SSH key from Azure Key Vault: $KV_NAME"
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
+            
+            # Generate SSH key
+            ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-$(date +%Y%m%d-%H%M)"
+            PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
+            
+            # Create Key Vault if it doesn't exist
+            az keyvault create \
+              --name "$KV_NAME" \
+              --resource-group "${RESOURCE_PREFIX}-shared-rg" \
+              --location "West Europe" \
+              --sku standard \
+              --tags owner=omerzlikin createdBy=terraform purpose=ssh-keys \
+              --output none 2>/dev/null || true
+            
+            # Store in Azure Key Vault for future runs
+            az keyvault secret set \
+              --vault-name "$KV_NAME" \
+              --name "vm-ssh-public-key" \
+              --value "$PUBLIC_KEY" \
+              --description "SSH public key for Terraform-managed VMs" \
+              --output none
+            
+            echo "✅ SSH key generated and stored in Key Vault: $KV_NAME"
+            echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
+          fi
+        fi
+        
+        # Validate SSH key format
+        if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+          echo "❌ Invalid SSH public key format"
+          exit 1
+        fi
+        
+        echo "🔑 SSH key configured successfully"
+
     - name: Setup Terraform Backend
       run: |
         # Set resource prefix from input or default
@@ -328,6 +390,7 @@ jobs:
           -var="vm_count=${{ env.VM_COUNT }}" \
           -var="vm_size=${{ env.VM_SIZE }}" \
           -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="admin_ssh_public_key=${{ env.SSH_PUBLIC_KEY }}" \
           -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
           -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
           -out=tfplan

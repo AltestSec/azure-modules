@@ -123,7 +123,7 @@ resource "azurerm_linux_virtual_machine" "main" {
 
   admin_ssh_key {
     username   = "adminuser"
-    public_key = file("~/.ssh/test_key.pub") # Update path as needed
+    public_key = var.admin_ssh_public_key
   }
 
   os_disk {

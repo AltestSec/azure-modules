@@ -47,7 +47,12 @@ parameters:
       - dev
       - staging
       - prod
-  
+
+  - name: resource_prefix
+    displayName: 'Resource Prefix'
+    type: string
+    default: 'omerzlikin'
+
   - name: action
     displayName: 'Action'
     type: string
@@ -62,6 +67,7 @@ variables:
   ARM_USE_MSI: true
   ARM_SUBSCRIPTION_ID: $(subscription_id)
   ARM_TENANT_ID: $(tenant_id)
+  RESOURCE_PREFIX: ${{ parameters.resource_prefix }}
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -77,6 +83,69 @@ stages:
       displayName: 'Install Terraform'
       inputs:
         terraformVersion: '1.7.0'
+
+    - task: AzureCLI@2
+      displayName: 'Setup SSH Key'
+      inputs:
+        azureSubscription: '$(service_connection_name)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Azure DevOps SSH key management using Key Vault
+          echo "🔍 Setting up SSH key for Azure DevOps pipeline..."
+          
+          # Set resource prefix
+          RESOURCE_PREFIX="${{ parameters.resource_prefix }}"
+          KV_NAME="${RESOURCE_PREFIX}-shared-kv"
+          
+          # Try to get existing key from Azure Key Vault
+          EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Using existing SSH key from Azure Key Vault: $KV_NAME"
+            echo "##vso[task.setvariable variable=SSH_PUBLIC_KEY]$EXISTING_KEY"
+          else
+            echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
+            
+            # Generate SSH key
+            ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-azdo-$(date +%Y%m%d-%H%M)"
+            PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
+            
+            # Create shared resource group if it doesn't exist
+            az group create \
+              --name "${RESOURCE_PREFIX}-shared-rg" \
+              --location "West Europe" \
+              --tags owner=omerzlikin createdBy=terraform purpose=shared-resources \
+              --output none || true
+            
+            # Create Key Vault if it doesn't exist
+            az keyvault create \
+              --name "$KV_NAME" \
+              --resource-group "${RESOURCE_PREFIX}-shared-rg" \
+              --location "West Europe" \
+              --sku standard \
+              --tags owner=omerzlikin createdBy=terraform purpose=ssh-keys \
+              --output none || true
+            
+            # Store in Azure Key Vault for future runs
+            az keyvault secret set \
+              --vault-name "$KV_NAME" \
+              --name "vm-ssh-public-key" \
+              --value "$PUBLIC_KEY" \
+              --description "SSH public key for Terraform-managed VMs (Azure DevOps)" \
+              --output none
+            
+            echo "✅ SSH key generated and stored in Key Vault: $KV_NAME"
+            echo "##vso[task.setvariable variable=SSH_PUBLIC_KEY]$PUBLIC_KEY"
+          fi
+          
+          # Validate SSH key format
+          if [[ ! "$PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]] && [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format"
+            exit 1
+          fi
+          
+          echo "🔑 SSH key configured successfully for Azure DevOps"
 
     - task: AzureCLI@2
       displayName: 'Setup Terraform Backend'
@@ -137,6 +206,7 @@ stages:
           -var="vm_count=${{ parameters.vm_count }}" \
           -var="vm_size=${{ parameters.vm_size }}" \
           -var="environment=${{ parameters.environment }}" \
+          -var="admin_ssh_public_key=$(SSH_PUBLIC_KEY)" \
           -out=tfplan
       displayName: 'Terraform Plan'
       env:

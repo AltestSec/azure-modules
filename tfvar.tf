@@ -56,6 +56,12 @@ variable "timezone" {
   default     = "Central European Standard Time"
 }
 
+variable "admin_ssh_public_key" {
+  description = "SSH public key for VM admin user"
+  type        = string
+  default     = ""
+}
+
 variable "work_hours_end" {
   description = "Work hours end"
   type        = string
