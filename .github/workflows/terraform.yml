@@ -65,7 +65,7 @@ on:
           - destroy
 
 env:
-  TF_WORKING_DIR: './az_payground'
+  TF_WORKING_DIR: 'az_payground'
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -84,6 +84,29 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Debug Workspace
+      run: |
+        echo "=== WORKSPACE DEBUG ==="
+        echo "Current directory: $(pwd)"
+        echo "GitHub Workspace: $GITHUB_WORKSPACE"
+        echo "Repository structure:"
+        ls -la
+        echo ""
+        echo "Looking for az_payground directory:"
+        if [ -d "az_payground" ]; then
+          echo "✅ az_payground found!"
+          echo "Contents of az_payground:"
+          ls -la az_payground/
+          echo ""
+          echo "Terraform files in az_payground:"
+          find ${HOME} -name "*.tf" -type f | head -10
+        else
+          echo "❌ az_payground directory not found"
+          echo "Available directories:"
+          find . -maxdepth 2 -type d | head -10
+        fi
+        echo "======================="
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
@@ -92,7 +115,9 @@ jobs:
     - name: Azure Login
       uses: azure/login@v2
       with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
     - name: Setup Terraform Backend
       run: |
