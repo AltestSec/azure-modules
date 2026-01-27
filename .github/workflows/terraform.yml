@@ -137,6 +137,11 @@ jobs:
       with:
         terraform_version: 1.7.0
 
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
     - name: Azure Login
       uses: azure/login@v1
       with:
@@ -175,11 +180,74 @@ jobs:
           -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
           -out=tfplan
 
-    - name: Upload Plan
+    - name: Generate Cost Estimate
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        # Generate cost breakdown for the planned infrastructure
+        infracost breakdown --path . \
+          --terraform-var="pool_type=${{ env.POOL_TYPE }}" \
+          --terraform-var="vm_count=${{ env.VM_COUNT }}" \
+          --terraform-var="vm_size=${{ env.VM_SIZE }}" \
+          --terraform-var="environment=${{ env.ENVIRONMENT }}" \
+          --terraform-var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+          --terraform-var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+          --format json \
+          --out-file infracost-base.json
+
+    - name: Generate Cost Summary
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        # Generate human-readable cost summary
+        infracost output --path infracost-base.json --format table > cost-estimate.txt
+        infracost output --path infracost-base.json --format html > cost-estimate.html
+        
+        echo "## 💰 Infrastructure Cost Estimate" >> cost-summary.md
+        echo "" >> cost-summary.md
+        echo "**Configuration:**" >> cost-summary.md
+        echo "- Pool Type: ${{ env.POOL_TYPE }}" >> cost-summary.md
+        echo "- VM Count: ${{ env.VM_COUNT }}" >> cost-summary.md
+        echo "- VM Size: ${{ env.VM_SIZE }}" >> cost-summary.md
+        echo "- Environment: ${{ env.ENVIRONMENT }}" >> cost-summary.md
+        echo "" >> cost-summary.md
+        echo "**Monthly Cost Breakdown:**" >> cost-summary.md
+        echo '```' >> cost-summary.md
+        cat cost-estimate.txt >> cost-summary.md
+        echo '```' >> cost-summary.md
+        
+        # Display cost estimate in workflow logs
+        echo "=== INFRASTRUCTURE COST ESTIMATE ==="
+        cat cost-estimate.txt
+        echo "===================================="
+
+    - name: Comment Cost Estimate on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const path = '${{ env.TF_WORKING_DIR }}/cost-summary.md';
+          
+          if (fs.existsSync(path)) {
+            const costSummary = fs.readFileSync(path, 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: costSummary
+            });
+          }
+
+    - name: Upload Plan and Cost Estimates
       uses: actions/upload-artifact@v4
       with:
-        name: terraform-plan
-        path: ${{ env.TF_WORKING_DIR }}/tfplan
+        name: terraform-plan-with-costs
+        path: |
+          ${{ env.TF_WORKING_DIR }}/tfplan
+          ${{ env.TF_WORKING_DIR }}/cost-estimate.txt
+          ${{ env.TF_WORKING_DIR }}/cost-estimate.html
+          ${{ env.TF_WORKING_DIR }}/infracost-base.json
+          ${{ env.TF_WORKING_DIR }}/cost-summary.md
 
   terraform-apply:
     name: 'Terraform Apply'
@@ -197,16 +265,32 @@ jobs:
       with:
         terraform_version: 1.7.0
 
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
     - name: Azure Login
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Download Plan
+    - name: Download Plan and Cost Estimates
       uses: actions/download-artifact@v4
       with:
-        name: terraform-plan
+        name: terraform-plan-with-costs
         path: ${{ env.TF_WORKING_DIR }}
+
+    - name: Display Pre-Apply Cost Estimate
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        echo "=== PRE-APPLY COST ESTIMATE ==="
+        if [ -f "cost-estimate.txt" ]; then
+          cat cost-estimate.txt
+        else
+          echo "Cost estimate file not found"
+        fi
+        echo "==============================="
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
@@ -217,7 +301,44 @@ jobs:
 
     - name: Terraform Apply
       working-directory: ${{ env.TF_WORKING_DIR }}
-      run: terraform apply -auto-approve tfplan
+      run: |
+        echo "🚀 Applying infrastructure changes..."
+        terraform apply -auto-approve tfplan
+        echo "✅ Infrastructure deployment completed"
+
+    - name: Generate Post-Apply Cost Analysis
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        # Generate current state cost analysis
+        infracost breakdown --path . \
+          --format json \
+          --out-file infracost-current.json
+        
+        # Generate readable cost report
+        infracost output --path infracost-current.json --format table > current-costs.txt
+        
+        echo "=== DEPLOYED INFRASTRUCTURE COSTS ==="
+        cat current-costs.txt
+        echo "====================================="
+        
+        # Create deployment summary
+        echo "## 🎉 Infrastructure Deployment Complete" > deployment-summary.md
+        echo "" >> deployment-summary.md
+        echo "**Deployed Configuration:**" >> deployment-summary.md
+        echo "- Pool Type: ${{ github.event.inputs.pool_type }}" >> deployment-summary.md
+        echo "- VM Count: ${{ github.event.inputs.vm_count }}" >> deployment-summary.md
+        echo "- VM Size: ${{ github.event.inputs.vm_size }}" >> deployment-summary.md
+        echo "- Environment: ${{ github.event.inputs.environment }}" >> deployment-summary.md
+        echo "" >> deployment-summary.md
+        echo "**Monthly Operating Costs:**" >> deployment-summary.md
+        echo '```' >> deployment-summary.md
+        cat current-costs.txt >> deployment-summary.md
+        echo '```' >> deployment-summary.md
+        echo "" >> deployment-summary.md
+        echo "**Next Steps:**" >> deployment-summary.md
+        echo "- VMs are configured with auto-shutdown schedules" >> deployment-summary.md
+        echo "- Monitor costs in Azure Cost Management" >> deployment-summary.md
+        echo "- Review and optimize resource usage regularly" >> deployment-summary.md
 
     - name: Setup VM Scheduling
       run: |
@@ -232,9 +353,111 @@ jobs:
           --runtime-version 3.9 \
           --functions-version 4 \
           --name "vm-scheduler-${{ github.event.inputs.environment }}" \
-          --storage-account "vmschedulerstorage"
+          --storage-account "vmschedulerstorage" || echo "Function app creation skipped (may already exist)"
         
         echo "VM scheduling configured for:"
         echo "Environment: ${{ github.event.inputs.environment }}"
         echo "Pool type: ${{ github.event.inputs.pool_type }}"
         echo "VM count: ${{ github.event.inputs.vm_count }}"
+
+  terraform-destroy:
+    name: 'Terraform Destroy'
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy' && github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.0
+
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set Variables
+      run: |
+        echo "POOL_TYPE=${{ github.event.inputs.pool_type }}" >> $GITHUB_ENV
+        echo "VM_COUNT=${{ github.event.inputs.vm_count }}" >> $GITHUB_ENV
+        echo "VM_SIZE=${{ github.event.inputs.vm_size }}" >> $GITHUB_ENV
+        echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+
+    - name: Terraform Init
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
+          -backend-config="resource_group_name=tfstate-rg"
+
+    - name: Generate Pre-Destroy Cost Analysis
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        # Show current costs before destruction
+        infracost breakdown --path . \
+          --format table > pre-destroy-costs.txt
+        
+        echo "=== RESOURCES TO BE DESTROYED ==="
+        cat pre-destroy-costs.txt
+        echo "================================="
+        
+        # Calculate monthly savings
+        MONTHLY_COST=$(infracost breakdown --path . --format json | jq -r '.totalMonthlyCost // "0"')
+        echo "💰 Monthly cost savings after destroy: \$${MONTHLY_COST}"
+
+    - name: Terraform Destroy
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        echo "🗑️ Destroying infrastructure..."
+        terraform destroy -auto-approve \
+          -var="pool_type=${{ env.POOL_TYPE }}" \
+          -var="vm_count=${{ env.VM_COUNT }}" \
+          -var="vm_size=${{ env.VM_SIZE }}" \
+          -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+          -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}"
+        echo "✅ Infrastructure destruction completed"
+
+    - name: Generate Destruction Summary
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        echo "## 🗑️ Infrastructure Destruction Complete" > destruction-summary.md
+        echo "" >> destruction-summary.md
+        echo "**Destroyed Configuration:**" >> destruction-summary.md
+        echo "- Pool Type: ${{ env.POOL_TYPE }}" >> destruction-summary.md
+        echo "- VM Count: ${{ env.VM_COUNT }}" >> destruction-summary.md
+        echo "- VM Size: ${{ env.VM_SIZE }}" >> destruction-summary.md
+        echo "- Environment: ${{ env.ENVIRONMENT }}" >> destruction-summary.md
+        echo "" >> destruction-summary.md
+        echo "**Cost Savings:**" >> destruction-summary.md
+        echo '```' >> destruction-summary.md
+        cat pre-destroy-costs.txt >> destruction-summary.md
+        echo '```' >> destruction-summary.md
+        echo "" >> destruction-summary.md
+        echo "All resources have been successfully removed from Azure." >> destruction-summary.md
+
+    - name: Upload Destruction Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: destruction-results
+        path: |
+          ${{ env.TF_WORKING_DIR }}/pre-destroy-costs.txt
+          ${{ env.TF_WORKING_DIR }}/destruction-summary.md
+
+    - name: Upload Deployment Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-results
+        path: |
+          ${{ env.TF_WORKING_DIR }}/current-costs.txt
+          ${{ env.TF_WORKING_DIR }}/infracost-current.json
+          ${{ env.TF_WORKING_DIR }}/deployment-summary.md

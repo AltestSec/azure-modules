@@ -7,6 +7,7 @@ This Terraform configuration creates a complete Azure infrastructure with VMs, S
 - **Scalable VM Infrastructure**: Create 1-5 VMs of different pool types (web, api, worker)
 - **Azure Service Bus**: Messaging infrastructure with topics and subscriptions
 - **Remote State Storage**: Terraform state stored in Azure Storage
+- **Cost Estimation**: Automated cost analysis during plan and apply phases
 - **Intelligent VM Scheduling**: 
   - Auto-shutdown outside work hours (9 AM - 6 PM CET)
   - Shutdown on weekends and Hungarian holidays
@@ -83,6 +84,49 @@ terraform apply -var="pool_type=web" -var="vm_count=2"
 | `auto_shutdown_enabled` | Enable auto-shutdown | `true` | `true`, `false` |
 | `work_hours_start` | Work start time | `09:00` | 24h format |
 | `work_hours_end` | Work end time | `18:00` | 24h format |
+
+## 💰 Cost Estimation
+
+The deployment pipeline automatically generates cost estimates for your infrastructure:
+
+### Automated Cost Analysis
+- **Plan Phase**: Shows estimated monthly costs before deployment
+- **Apply Phase**: Displays actual deployed resource costs
+- **Destroy Phase**: Calculates monthly savings from resource removal
+
+### Cost Breakdown Example
+```
+Name                                    Monthly Qty  Unit         Monthly Cost
+
+azurerm_linux_virtual_machine.main[0]
+├─ Instance usage (Linux, pay as you go, Standard_B2als_v2)  160 hours  $0.0416         $6.66
+├─ os_disk
+│  └─ Storage (P4)                                            1 months   $5.92           $5.92
+
+azurerm_linux_virtual_machine.main[1]
+├─ Instance usage (Linux, pay as you go, Standard_B2als_v2)  160 hours  $0.0416         $6.66
+├─ os_disk
+│  └─ Storage (P4)                                            1 months   $5.92           $5.92
+
+azurerm_public_ip.main[0]
+└─ IP address (static)                                        1 months   $3.65           $3.65
+
+azurerm_public_ip.main[1]
+└─ IP address (static)                                        1 months   $3.65           $3.65
+
+OVERALL TOTAL                                                                            $32.46
+```
+
+### Cost Optimization Features
+- **Auto-shutdown**: Reduces VM costs by ~65% (160h vs 730h monthly)
+- **Burstable VMs**: B-series VMs provide cost-effective performance
+- **Resource Tagging**: Enables cost tracking and allocation
+- **Environment-based**: Separate cost tracking per environment
+
+### Setup Cost Estimation
+1. **Get Infracost API Key**: Sign up at [infracost.io](https://www.infracost.io/)
+2. **Add GitHub Secret**: `INFRACOST_API_KEY`
+3. **Run Pipeline**: Cost estimates appear in PR comments and workflow logs
 
 ## VM Scheduling
 

@@ -1,0 +1,39 @@
+# Infracost configuration for Azure infrastructure cost estimation
+version: 0.1
+
+projects:
+  - path: .
+    name: azure-playground-infrastructure
+    terraform_var_files:
+      - terraform.tfvars
+    
+# Currency settings
+currency: USD
+
+# Enable detailed breakdown
+enable_dashboard: true
+
+# Cost policies (optional)
+policies:
+  - name: cost-threshold
+    rules:
+      - condition: monthly_cost > 100
+        message: "Monthly cost exceeds $100 threshold"
+        level: warning
+      - condition: monthly_cost > 500
+        message: "Monthly cost exceeds $500 threshold - review required"
+        level: error
+
+# Resource-specific settings
+resource_usage:
+  # VM usage assumptions (8 hours/day, 5 days/week for cost-effective estimates)
+  azurerm_linux_virtual_machine:
+    operating_hours_per_month: 160  # 8h/day * 5 days/week * 4 weeks
+  
+  # Storage usage
+  azurerm_managed_disk:
+    monthly_disk_operations: 1000000
+  
+  # Network usage
+  azurerm_public_ip:
+    monthly_data_transfer_gb: 100
