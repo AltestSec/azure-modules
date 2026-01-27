@@ -138,11 +138,6 @@ jobs:
         
         # Create resource group for Terraform state
         az group create --name "$RG_NAME" --location "$LOCATION" --output none || true
-
-        #Test for role assignment
-        #az role assignment list --assignee "${env.AZURE_CLIENT_ID)" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
-        az role assignment list --assignee "${ARM_CLIENT_ID}" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
-
         
         # Create storage account with versioning and RBAC
         az storage account create \
@@ -170,6 +165,10 @@ jobs:
         # Get current user/service principal object ID
         CURRENT_USER_ID=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || az account show --query user.name -o tsv)
         
+        #Test for role assignment
+        #az role assignment list --assignee "${env.AZURE_CLIENT_ID)" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
+        az role assignment list --assignee "${ARM_CLIENT_ID}" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
+
         # Assign Storage Blob Data Contributor role for RBAC access
         az role assignment create \
           --assignee "$CURRENT_USER_ID" \
