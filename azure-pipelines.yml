@@ -94,9 +94,10 @@ stages:
           # Azure DevOps SSH key management using Key Vault
           echo "🔍 Setting up SSH key for Azure DevOps pipeline..."
           
-          # Set resource prefix
+          # Set resource prefix and use same resource group as main infrastructure
           RESOURCE_PREFIX="${{ parameters.resource_prefix }}"
-          KV_NAME="${RESOURCE_PREFIX}-shared-kv"
+          KV_NAME="${RESOURCE_PREFIX}-kv"
+          RG_NAME="${RESOURCE_PREFIX}-rg-playground"
           
           # Try to get existing key from Azure Key Vault
           EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
@@ -111,20 +112,20 @@ stages:
             ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-azdo-$(date +%Y%m%d-%H%M)"
             PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
             
-            # Create shared resource group if it doesn't exist
+            # Use same resource group as main infrastructure
             az group create \
-              --name "${RESOURCE_PREFIX}-shared-rg" \
+              --name "$RG_NAME" \
               --location "West Europe" \
-              --tags owner=omerzlikin createdBy=terraform purpose=shared-resources \
+              --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=playground \
               --output none || true
             
-            # Create Key Vault if it doesn't exist
+            # Create Key Vault in same resource group
             az keyvault create \
               --name "$KV_NAME" \
-              --resource-group "${RESOURCE_PREFIX}-shared-rg" \
+              --resource-group "$RG_NAME" \
               --location "West Europe" \
               --sku standard \
-              --tags owner=omerzlikin createdBy=terraform purpose=ssh-keys \
+              --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
               --output none || true
             
             # Store in Azure Key Vault for future runs
