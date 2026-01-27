@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - develop
+      - az_payground/**
     paths:
       - 'az_payground/**'
   pull_request:
@@ -172,7 +173,7 @@ jobs:
         # Assign Storage Blob Data Contributor role for RBAC access
         SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
         az role assignment create \
-          --assignee "$SP_OBJ_ID" \
+          --assignee "${SP_OBJ_ID}" \
           --role "Storage Blob Data Contributor" \
           --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
           --output none || true
@@ -182,7 +183,7 @@ jobs:
           --account-name "$STORAGE_NAME" \
           --file-system tfstate \
           --path "/" \
-          --acl "user:${$SP_OBJ_ID}:rwx,default:user:${$SP_OBJ_ID}:rwx" \
+          --acl "user:${SP_OBJ_ID}:rwx,default:user:${SP_OBJ_ID}:rwx" \
           --auth-mode login
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
