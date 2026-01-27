@@ -196,16 +196,17 @@ jobs:
             --scope "$SA_ID" \
             -o none
         fi
-
+        
+        echo "Let's wait 5 minutes until the role assignment is assignet"
         sleep 300
 
         echo "Setting ACL for Terraform SP..."
-        az storage fs access set \
-          --account-name "$STORAGE_NAME" \
-          --file-system tfstate \
-          --path "/" \
-          --acl "user:${SP_OBJ_ID}:rwx,default:user:${SP_OBJ_ID}:rwx" \
-          --auth-mode login
+        # az storage fs access set \
+        #   --account-name "$STORAGE_NAME" \
+        #   --file-system tfstate \
+        #   --path "/" \
+        #   --acl "user:${SP_OBJ_ID}:rwx,default:user:${SP_OBJ_ID}:rwx" \
+        #   --auth-mode login
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
