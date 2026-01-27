@@ -42,7 +42,7 @@ resource "azurerm_windows_virtual_machine" "session_host" {
   admin_username      = var.admin_username
   admin_password      = var.admin_password
 
-  disable_password_authentication = false
+  #disable_password_authentication = false - it is for windows, dummy
 
   network_interface_ids = [
     azurerm_network_interface.session_host[count.index].id,

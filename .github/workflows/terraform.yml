@@ -174,7 +174,6 @@ jobs:
 
         # Assign Storage Blob Data Contributor role for RBAC access
         SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
-        echo $SP_OBJ_ID
         #az role assignment create \
         #  --assignee-object-id "${SP_OBJ_ID}" \
         #  --role "Storage Blob Data Contributor" \

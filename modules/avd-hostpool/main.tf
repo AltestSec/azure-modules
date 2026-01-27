@@ -12,6 +12,10 @@ terraform {
   }
 }
 
+locals {
+  registration_token = azurerm_virtual_desktop_host_pool_registration_info.registrationinfo.token
+}
+
 # AVD Host Pool
 resource "azurerm_virtual_desktop_host_pool" "main" {
   name                = "avd-hp-${var.pool_name}-${var.environment}-${var.location_short}"
@@ -44,6 +48,12 @@ resource "azurerm_virtual_desktop_host_pool" "main" {
   }
 
   tags = var.tags
+}
+
+# Host Pool Registration Info (for session host registration)
+resource "azurerm_virtual_desktop_host_pool_registration_info" "registrationinfo" {
+  hostpool_id     = azurerm_virtual_desktop_host_pool.main.id
+  expiration_date = timeadd(timestamp(), "48h")  # Token expires in 48 hours
 }
 
 # AVD Application Group

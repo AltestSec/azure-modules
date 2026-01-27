@@ -12,7 +12,7 @@ output "host_pool_name" {
 
 output "host_pool_token" {
   description = "Registration token for the host pool"
-  value       = azurerm_virtual_desktop_host_pool.main.registration_info[0].token
+  value       = azurerm_virtual_desktop_host_pool_registration_info.registrationinfo.token 
   sensitive   = true
 }
 

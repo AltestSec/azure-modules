@@ -26,9 +26,9 @@ resource "azurerm_servicebus_topic" "main" {
   name         = var.service_bus_topic_name
   namespace_id = azurerm_servicebus_namespace.main.id
 
-  enable_batched_operations     = true
-  enable_express               = false
-  enable_partitioning          = false
+  batched_operations_enabled     = true
+  express_enabled               = false
+  partitioning_enabled          = false
   requires_duplicate_detection = false
   support_ordering            = false
   
@@ -45,7 +45,7 @@ resource "azurerm_servicebus_subscription" "main" {
   name     = each.value
   topic_id = azurerm_servicebus_topic.main.id
 
-  enable_batched_operations                = true
+  batched_operations_enabled                = true
   dead_lettering_on_message_expiration     = false
   dead_lettering_on_filter_evaluation_error = false
   requires_session                         = false

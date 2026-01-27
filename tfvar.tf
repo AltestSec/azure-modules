@@ -55,3 +55,9 @@ variable "timezone" {
   type        = string
   default     = "Central European Standard Time"
 }
+
+variable "work_hours_end" {
+  description = "Work hours end"
+  type        = string
+  default     = "Central European Standard Time"
+}
