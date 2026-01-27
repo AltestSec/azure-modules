@@ -128,7 +128,7 @@ jobs:
         LOCATION="${{ github.event.inputs.location }}"
         # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
         #STORAGE_NAME="${RESOURCE_PREFIX}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
-        STORAGE_NAME="${RESOURCE_PREFIX}tfstates"
+        STORAGE_NAME="${RESOURCE_PREFIX}-tfstates"
         RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
         
         echo "Creating Terraform state storage with prefix: $RESOURCE_PREFIX"
@@ -162,8 +162,8 @@ jobs:
         
         # Create container for Terraform state
         az storage container create \
-          --name tfstate \
-          --account-name "$STORAGE_NAME-${{ env.ENVIRONMENT }}" \
+          --name "$STORAGE_NAME-${{ github.event.inputs.environment }}" \
+          --account-name "$STORAGE_NAME" \
           --auth-mode login \
           --output none || true
         
