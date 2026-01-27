@@ -138,18 +138,18 @@ jobs:
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
 
     - name: Terraform Init
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=tfstate-rg"
 
     - name: Terraform Validate
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: terraform validate
 
     - name: Terraform Format Check
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: terraform fmt -check
 
   terraform-plan:
@@ -192,14 +192,14 @@ jobs:
         fi
 
     - name: Terraform Init
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=tfstate-rg"
 
     - name: Terraform Plan
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         terraform plan \
           -var="pool_type=${{ env.POOL_TYPE }}" \
@@ -211,7 +211,7 @@ jobs:
           -out=tfplan
 
     - name: Generate Cost Estimate
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         # Generate cost breakdown for the planned infrastructure
         infracost breakdown --path . \
@@ -225,7 +225,7 @@ jobs:
           --out-file infracost-base.json
 
     - name: Generate Cost Summary
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         # Generate human-readable cost summary
         infracost output --path infracost-base.json --format table > cost-estimate.txt
@@ -255,7 +255,7 @@ jobs:
       with:
         script: |
           const fs = require('fs');
-          const path = '${{ env.TF_WORKING_DIR }}/cost-summary.md';
+          const path = '${{ GITHUB_WORKSPACE }}/cost-summary.md';
           
           if (fs.existsSync(path)) {
             const costSummary = fs.readFileSync(path, 'utf8');
@@ -273,11 +273,11 @@ jobs:
       with:
         name: terraform-plan-with-costs
         path: |
-          ${{ env.TF_WORKING_DIR }}/tfplan
-          ${{ env.TF_WORKING_DIR }}/cost-estimate.txt
-          ${{ env.TF_WORKING_DIR }}/cost-estimate.html
-          ${{ env.TF_WORKING_DIR }}/infracost-base.json
-          ${{ env.TF_WORKING_DIR }}/cost-summary.md
+          ${{ GITHUB_WORKSPACE }}/tfplan
+          ${{ GITHUB_WORKSPACE }}/cost-estimate.txt
+          ${{ GITHUB_WORKSPACE }}/cost-estimate.html
+          ${{ GITHUB_WORKSPACE }}/infracost-base.json
+          ${{ GITHUB_WORKSPACE }}/cost-summary.md
 
   terraform-apply:
     name: 'Terraform Apply'
@@ -309,10 +309,10 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: terraform-plan-with-costs
-        path: ${{ env.TF_WORKING_DIR }}
+        path: ${{ GITHUB_WORKSPACE }}
 
     - name: Display Pre-Apply Cost Estimate
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         echo "=== PRE-APPLY COST ESTIMATE ==="
         if [ -f "cost-estimate.txt" ]; then
@@ -323,21 +323,21 @@ jobs:
         echo "==============================="
 
     - name: Terraform Init
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=tfstate-rg"
 
     - name: Terraform Apply
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         echo "🚀 Applying infrastructure changes..."
         terraform apply -auto-approve tfplan
         echo "✅ Infrastructure deployment completed"
 
     - name: Generate Post-Apply Cost Analysis
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         # Generate current state cost analysis
         infracost breakdown --path . \
@@ -395,9 +395,9 @@ jobs:
       with:
         name: deployment-results
         path: |
-          ${{ env.TF_WORKING_DIR }}/current-costs.txt
-          ${{ env.TF_WORKING_DIR }}/infracost-current.json
-          ${{ env.TF_WORKING_DIR }}/deployment-summary.md
+          ${{ GITHUB_WORKSPACE }}/current-costs.txt
+          ${{ GITHUB_WORKSPACE }}/infracost-current.json
+          ${{ GITHUB_WORKSPACE }}/deployment-summary.md
 
   terraform-destroy:
     name: 'Terraform Destroy'
@@ -432,14 +432,14 @@ jobs:
         echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
 
     - name: Terraform Init
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=tfstate-rg"
 
     - name: Generate Pre-Destroy Cost Analysis
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         # Show current costs before destruction
         infracost breakdown --path . \
@@ -454,7 +454,7 @@ jobs:
         echo "💰 Monthly cost savings after destroy: \$${MONTHLY_COST}"
 
     - name: Terraform Destroy
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         echo "🗑️ Destroying infrastructure..."
         terraform destroy -auto-approve \
@@ -467,7 +467,7 @@ jobs:
         echo "✅ Infrastructure destruction completed"
 
     - name: Generate Destruction Summary
-      working-directory: ${{ env.TF_WORKING_DIR }}
+      working-directory: ${{ GITHUB_WORKSPACE }}
       run: |
         echo "## 🗑️ Infrastructure Destruction Complete" > destruction-summary.md
         echo "" >> destruction-summary.md
@@ -489,5 +489,5 @@ jobs:
       with:
         name: destruction-results
         path: |
-          ${{ env.TF_WORKING_DIR }}/pre-destroy-costs.txt
-          ${{ env.TF_WORKING_DIR }}/destruction-summary.md
+          ${{ GITHUB_WORKSPACE }}/pre-destroy-costs.txt
+          ${{ GITHUB_WORKSPACE }}/destruction-summary.md
