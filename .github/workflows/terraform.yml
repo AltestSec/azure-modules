@@ -198,7 +198,7 @@ jobs:
         fi
         
         echo "Let's wait 5 minutes until the role assignment is assignet"
-        sleep 300
+        sleep 120
 
         echo "Setting ACL for Terraform SP..."
         # az storage fs access set \
