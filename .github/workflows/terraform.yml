@@ -188,16 +188,20 @@ jobs:
         # create only if missing
         if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
           --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
-          az role assignment create \
-            --assignee-object-id "$SP_OBJ_ID" \
-            --assignee-principal-type ServicePrincipal \
-            --role "Storage Blob Data Contributor" \
-            --scope "$SA_ID" \
-            -o none
+          for i in {1..30}; do
+            echo "Attempt Assign Blob Storage Contributor  set ($i/30)..."
+            az role assignment create \
+              --assignee-object-id "$SP_OBJ_ID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Storage Blob Data Contributor" \
+              --scope "$SA_ID" \
+              -o none
+            sleep 5
+          done
         fi
-        
+
         echo "Let's wait 5 minutes until the role assignment is assignet"
-        sleep 60
+        #sleep 60
 
         echo "Setting ACL for Terraform SP..."
         # az storage fs access set \
