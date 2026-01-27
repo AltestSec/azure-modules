@@ -127,7 +127,8 @@ jobs:
         
         LOCATION="${{ github.event.inputs.location }}"
         # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-        STORAGE_NAME="${RESOURCE_PREFIX}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        #STORAGE_NAME="${RESOURCE_PREFIX}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        STORAGE_NAME="${RESOURCE_PREFIX}tfstates"
         RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
         
         echo "Creating Terraform state storage with prefix: $RESOURCE_PREFIX"
@@ -137,6 +138,9 @@ jobs:
         
         # Create resource group for Terraform state
         az group create --name "$RG_NAME" --location "$LOCATION" --output none || true
+
+        #Test for role assignment
+        az role assignment list --assignee "${env.AZURE_CLIENT_ID)" --scope "$(az storage account show -n "$STORAGE_NAME" --query id -o tsv)" -o table
         
         # Create storage account with versioning and RBAC
         az storage account create \
@@ -157,7 +161,7 @@ jobs:
         # Create container for Terraform state
         az storage container create \
           --name tfstate \
-          --account-name "$STORAGE_NAME" \
+          --account-name "$STORAGE_NAME-${env.GITHUB_ENV}" \
           --auth-mode login \
           --output none || true
         
@@ -168,13 +172,48 @@ jobs:
         az role assignment create \
           --assignee "$CURRENT_USER_ID" \
           --role "Storage Blob Data Contributor" \
-          --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
+          --scope "/subscriptions/${env.ARM_SUBSCRIPTION_ID}}/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
           --output none || true
+
+        echo "Setting ACL for Terraform SP..."
+        az storage fs access set \
+          --account-name "$STORAGE_ACCOUNT_NAME" \
+          --file-system tfstate \
+          --acl "user:${env.AZURE_CLIENT_ID}:rwx" \
+          --auth-mode login
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
         echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
         echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
+
+    - name: Test Storage Setup
+      run: |
+        set -euo pipefail
+
+        echo "Check storage account exists..."
+        if ! az storage account show -n "$STORAGE_ACCOUNT_NAME" -g "$TFSTATE_RG_NAME" --query "name" -o tsv >/dev/null 2>&1; then
+          echo "Storage account $STORAGE_ACCOUNT_NAME not found in RG $TFSTATE_RG_NAME"
+          exit 1
+        fi
+
+        echo "Check container exists..."
+        if ! az storage container exists \
+          --account-name "$STORAGE_ACCOUNT_NAME" \
+          --name tfstate \
+          --auth-mode login \
+          --query exists -o tsv 2>/dev/null | grep -qx true; then
+          echo "Container tfstate does not exist (or no access)."
+          exit 1
+        fi
+
+        echo "Test blob access (AAD)..."
+        az storage blob list \
+          --account-name "$STORAGE_ACCOUNT_NAME" \
+          --container-name tfstate \
+          --auth-mode login \
+          --num-results 1 \
+          --query "[0].name" -o tsv >/dev/null
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
