@@ -71,6 +71,10 @@ env:
   ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   terraform-validate:
     name: 'Terraform Validate'
@@ -89,9 +93,9 @@ jobs:
       uses: azure/login@v2
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        enable-AzPSSession: true
 
     - name: Setup Terraform Backend
       run: |
@@ -149,9 +153,9 @@ jobs:
       uses: azure/login@v2
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        enable-AzPSSession: true
 
     - name: Set Variables
       run: |
@@ -163,7 +167,7 @@ jobs:
         else
           echo "POOL_TYPE=web" >> $GITHUB_ENV
           echo "VM_COUNT=2" >> $GITHUB_ENV
-          echo "VM_SIZE=Standard_B2s" >> $GITHUB_ENV
+          echo "VM_SIZE=Standard_B2als_v2" >> $GITHUB_ENV
           echo "ENVIRONMENT=dev" >> $GITHUB_ENV
         fi
 
@@ -280,9 +284,9 @@ jobs:
       uses: azure/login@v2
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        enable-AzPSSession: true
 
     - name: Download Plan and Cost Estimates
       uses: actions/download-artifact@v4
@@ -402,9 +406,9 @@ jobs:
       uses: azure/login@v2
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        enable-AzPSSession: true
 
     - name: Set Variables
       run: |
