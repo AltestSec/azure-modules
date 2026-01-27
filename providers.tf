@@ -23,6 +23,6 @@ provider "azurerm" {
     }
   }
 
-  subscription_id = var.subscription_id
-  tenant_id       = var.tenant_id
+  # Use environment variables for authentication (ARM_CLIENT_ID, ARM_CLIENT_SECRET, etc.)
+  # These will be set by the GitHub Actions workflow
 }
