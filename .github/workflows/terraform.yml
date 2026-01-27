@@ -192,14 +192,14 @@ jobs:
         set -euo pipefail
 
         echo "Check storage account exists..."
-        if ! az storage account show -n "$STORAGE_ACCOUNT_NAME" -g "$TFSTATE_RG_NAME" --query "name" -o tsv >/dev/null 2>&1; then
-          echo "Storage account $STORAGE_ACCOUNT_NAME not found in RG $TFSTATE_RG_NAME"
+        if ! az storage account show -n "$STORAGE_NAME" -g "$TFSTATE_RG_NAME" --query "name" -o tsv >/dev/null 2>&1; then
+          echo "Storage account $STORAGE_NAME not found in RG $TFSTATE_RG_NAME"
           exit 1
         fi
 
         echo "Check container exists..."
         if ! az storage container exists \
-          --account-name "$STORAGE_ACCOUNT_NAME" \
+          --account-name "$STORAGE_NAME" \
           --name tfstate \
           --auth-mode login \
           --query exists -o tsv 2>/dev/null | grep -qx true; then
@@ -209,7 +209,7 @@ jobs:
 
         echo "Test blob access (AAD)..."
         az storage blob list \
-          --account-name "$STORAGE_ACCOUNT_NAME" \
+          --account-name "$STORAGE_NAME" \
           --container-name tfstate \
           --auth-mode login \
           --num-results 1 \
@@ -219,7 +219,7 @@ jobs:
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
-          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
+          -backend-config="storage_account_name=${{ env.STORAGE_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
           -backend-config="use_azuread_auth=true"
 
