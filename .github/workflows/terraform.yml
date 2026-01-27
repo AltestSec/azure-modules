@@ -174,13 +174,28 @@ jobs:
 
         # Assign Storage Blob Data Contributor role for RBAC access
         SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
-        az role assignment create \
-          --assignee-object-id "${SP_OBJ_ID}" \
-          --role "Storage Blob Data Contributor" \
-          --assignee-principal-type ServicePrincipal
+        echo $SP_OBJ_ID
+        #az role assignment create \
+        #  --assignee-object-id "${SP_OBJ_ID}" \
+        #  --role "Storage Blob Data Contributor" \
+        #  --assignee-principal-type ServicePrincipal
           #--scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
-          --scope "$(az storage account show -g "$RG_NAME" -n "$STORAGE_NAME" --query id -o tsv)" \
-          --output none || true
+        #  --scope "$(az storage account show -g "$RG_NAME" -n "$STORAGE_NAME" --query id -o tsv)" \
+        #  --output none || true
+        SA_ID="$(az storage account show -g "$RG_NAME" -n "$STORAGE_NAME" --query id -o tsv)"
+
+        az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" -o table
+
+        # create only if missing
+        if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
+          --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
+          az role assignment create \
+            --assignee-object-id "$SP_OBJ_ID" \
+            --assignee-principal-type ServicePrincipal \
+            --role "Storage Blob Data Contributor" \
+            --scope "$SA_ID" \
+            -o none
+        fi
 
         sleep 300
 
