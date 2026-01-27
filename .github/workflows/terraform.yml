@@ -172,7 +172,7 @@ jobs:
         az role assignment create \
           --assignee "$CURRENT_USER_ID" \
           --role "Storage Blob Data Contributor" \
-          --scope "/subscriptions/${env.ARM_SUBSCRIPTION_ID}}/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
+          --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME" \
           --output none || true
 
         echo "Setting ACL for Terraform SP..."
