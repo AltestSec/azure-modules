@@ -159,7 +159,7 @@ jobs:
         
         # Create container for Terraform state
         az storage container create \
-          --name "${STORAGE_NAME}-{{ github.event.inputs.environment }}" \
+          --name "${STORAGE_NAME}-${{ github.event.inputs.environment }}" \
           --account-name "$STORAGE_NAME" \
           --auth-mode login \
           --output none || true
@@ -184,7 +184,7 @@ jobs:
           done
         fi
 
-        echo "Setting ACL for Terraform SP..."
+        #echo "Setting ACL for Terraform SP..."
         # az storage fs access set \
         #   --account-name "$STORAGE_NAME" \
         #   --file-system tfstate \
@@ -307,11 +307,11 @@ jobs:
             fi
           done
 
-          az role assignment create \
-              --role "Key Vault Secrets Officer" \
-              --assignee oleksandr.merzlikin_nixs.com#EXT#@devnix.onmicrosoft.com \
-              --scope "$KV_ID" \
-              --output none 2>/dev/null
+          # az role assignment create \
+          #     --role "Key Vault Secrets Officer" \
+          #     --assignee ${USER} \
+          #     --scope "$KV_ID" \
+          #     --output none 2>/dev/null
           
           # Wait for role assignment to propagate
           echo "Waiting for RBAC permissions to propagate..."
