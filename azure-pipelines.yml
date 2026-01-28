@@ -98,8 +98,48 @@ stages:
           RESOURCE_PREFIX="${{ parameters.resource_prefix }}"
           KV_NAME="${RESOURCE_PREFIX}-kv"
           RG_NAME="${RESOURCE_PREFIX}-rg-playground"
+          LOCATION="West Europe"
           
-          # Try to get existing key from Azure Key Vault
+          # Key Vault Cleanup Section for Azure DevOps
+          echo "🧹 Checking for existing/deleted Key Vault: $KV_NAME"
+          
+          # Check if Key Vault exists in soft-deleted state
+          if az keyvault show-deleted --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null; then
+            echo "⚠️ Found soft-deleted Key Vault, attempting cleanup..."
+            
+            # Try to purge the soft-deleted Key Vault
+            if az keyvault purge --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null; then
+              echo "🔥 Purging soft-deleted Key Vault..."
+              
+              # Wait for purge to complete (max 2 minutes for Azure DevOps)
+              PURGE_SUCCESS=false
+              for i in {1..12}; do  # 12 attempts * 10 seconds = 2 minutes
+                if ! az keyvault show-deleted --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null; then
+                  echo "✅ Key Vault purge completed successfully"
+                  PURGE_SUCCESS=true
+                  break
+                fi
+                echo "Waiting for purge completion... ($i/12)"
+                sleep 10
+              done
+              
+              # If purge didn't complete in time, use alternative name
+              if [ "$PURGE_SUCCESS" = false ]; then
+                echo "⏰ Purge taking too long, using alternative Key Vault name"
+                KV_NAME="${RESOURCE_PREFIX}-common-kv"
+                echo "🔄 New Key Vault name: $KV_NAME"
+              fi
+            else
+              echo "❌ Cannot purge soft-deleted Key Vault (may have purge protection)"
+              echo "🔄 Using alternative Key Vault name"
+              KV_NAME="${RESOURCE_PREFIX}-common-kv"
+              echo "New Key Vault name: $KV_NAME"
+            fi
+          else
+            echo "✅ No soft-deleted Key Vault found, proceeding with creation"
+          fi
+          
+          # Try to get existing key from Azure Key Vault (after cleanup)
           EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
           
           if [ -n "$EXISTING_KEY" ]; then
@@ -115,15 +155,16 @@ stages:
             # Use same resource group as main infrastructure
             az group create \
               --name "$RG_NAME" \
-              --location "West Europe" \
+              --location "$LOCATION" \
               --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=playground \
               --output none || true
             
-            # Create Key Vault in same resource group
+            # Create Key Vault in same resource group (using cleaned/alternative name)
+            echo "🔧 Creating Key Vault: $KV_NAME"
             az keyvault create \
               --name "$KV_NAME" \
               --resource-group "$RG_NAME" \
-              --location "West Europe" \
+              --location "$LOCATION" \
               --sku standard \
               --enable-rbac-authorization true \
               --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
