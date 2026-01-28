@@ -67,3 +67,9 @@ variable "work_hours_end" {
   type        = string
   default     = "Central European Standard Time"
 }
+
+variable "auto_shutdown_enabled" {
+  description = "Enable auto-shutdown for VMs"
+  type        = bool
+  default     = true
+}

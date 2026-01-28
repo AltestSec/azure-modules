@@ -159,7 +159,7 @@ jobs:
         
         # Create container for Terraform state
         az storage container create \
-          --name "${STORAGE_NAME}-${{ github.event.inputs.environment }}" \
+          --name "${STORAGE_NAME}-${{ github.event.inputs.environment || 'dev' }}" \
           --account-name "$STORAGE_NAME" \
           --auth-mode login \
           --output none || true
@@ -323,14 +323,14 @@ jobs:
         # SSH key management with GitHub Secrets priority
         if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
           echo "✅ Using SSH key from GitHub Secrets"
-          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
           
-          # Validate SSH key format
+          # Validate SSH key format first
           if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
             echo "❌ Invalid SSH public key format in GitHub Secrets"
             exit 1
           fi
           
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
           echo "🔑 SSH key from GitHub Secrets configured successfully"
         else
           echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, using Azure Key Vault..."
@@ -341,13 +341,27 @@ jobs:
           
           if [ -n "$EXISTING_KEY" ]; then
             echo "✅ Using existing SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate existing key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
             echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
           else
             echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
             
             # Generate SSH key
+            mkdir -p ~/.ssh
             ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-github-$(date +%Y%m%d-%H%M)"
             PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
+            
+            # Validate generated key format
+            if [[ ! "$PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Generated SSH public key has invalid format"
+              exit 1
+            fi
             
             # Store in Azure Key Vault for future runs
             az keyvault secret set \
@@ -361,12 +375,6 @@ jobs:
             echo "💡 For faster access, add this key to GitHub Secrets as VM_SSH_PUBLIC_KEY:"
             echo "$PUBLIC_KEY"
             echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
-          fi
-          
-          # Validate SSH key format
-          if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
-            echo "❌ Invalid SSH public key format"
-            exit 1
           fi
         fi
         
@@ -451,7 +459,7 @@ jobs:
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
-          -backend-config="container_name=tfstate" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ github.event.inputs.environment || 'dev' }}" \
           -backend-config="key=terraform.tfstate" \
           -backend-config="use_azuread_auth=true"
 
@@ -497,6 +505,7 @@ jobs:
           echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
           echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
           echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+          echo "LOCATION=${{ github.event.inputs.location }}" >> $GITHUB_ENV
         else
           echo "POOL_TYPE=web" >> $GITHUB_ENV
           echo "VM_COUNT=2" >> $GITHUB_ENV
@@ -504,14 +513,56 @@ jobs:
           echo "ENVIRONMENT=dev" >> $GITHUB_ENV
           echo "RESOURCE_PREFIX=omerzlikin" >> $GITHUB_ENV
           echo "DUE_DATE=2026-02-12" >> $GITHUB_ENV
+          echo "LOCATION=westeurope" >> $GITHUB_ENV
         fi
         
         # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-        STORAGE_NAME="${{ env.RESOURCE_PREFIX }}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        STORAGE_NAME="${{ env.RESOURCE_PREFIX }}tfstates"
         RG_NAME="${{ env.RESOURCE_PREFIX }}-tfstate-rg"
+        KV_NAME="${{ env.RESOURCE_PREFIX }}-kv"
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+
+    - name: Retrieve SSH Key
+      run: |
+        # SSH key retrieval with GitHub Secrets priority
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          
+          # Validate SSH key format
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, retrieving from Azure Key Vault..."
+          
+          # Retrieve SSH key from Key Vault
+          echo "🔍 Retrieving SSH key from Key Vault: ${{ env.KV_NAME }}"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "${{ env.KV_NAME }}" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Retrieved SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "❌ SSH key not found in Key Vault. Please run terraform-validate job first to generate SSH key."
+            exit 1
+          fi
+        fi
+        
+        echo "🔑 SSH key retrieved successfully"
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
@@ -519,6 +570,8 @@ jobs:
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ env.ENVIRONMENT }}" \
+          -backend-config="key=terraform.tfstate" \
           -backend-config="use_azuread_auth=true"
 
     - name: Terraform Plan
@@ -530,8 +583,8 @@ jobs:
           -var="vm_size=${{ env.VM_SIZE }}" \
           -var="environment=${{ env.ENVIRONMENT }}" \
           -var="admin_ssh_public_key=${{ env.SSH_PUBLIC_KEY }}" \
-          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-          -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+          -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
           -out=tfplan
 
     - name: Generate Cost Estimate
@@ -543,8 +596,8 @@ jobs:
           --terraform-var="vm_count=${{ env.VM_COUNT }}" \
           --terraform-var="vm_size=${{ env.VM_SIZE }}" \
           --terraform-var="environment=${{ env.ENVIRONMENT }}" \
-          --terraform-var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-          --terraform-var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+          --terraform-var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          --terraform-var="tenant_id=${{ env.ARM_TENANT_ID }}" \
           --format json \
           --out-file infracost-base.json
 
@@ -639,13 +692,55 @@ jobs:
         echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
         echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
         echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+        echo "LOCATION=${{ github.event.inputs.location }}" >> $GITHUB_ENV
         
         # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}tfstates"
         RG_NAME="${{ github.event.inputs.resource_prefix }}-tfstate-rg"
+        KV_NAME="${{ github.event.inputs.resource_prefix }}-kv"
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+
+    - name: Retrieve SSH Key
+      run: |
+        # SSH key retrieval with GitHub Secrets priority
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          
+          # Validate SSH key format
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, retrieving from Azure Key Vault..."
+          
+          # Retrieve SSH key from Key Vault
+          echo "🔍 Retrieving SSH key from Key Vault: ${{ env.KV_NAME }}"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "${{ env.KV_NAME }}" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Retrieved SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "❌ SSH key not found in Key Vault. Please run terraform-validate job first to generate SSH key."
+            exit 1
+          fi
+        fi
+        
+        echo "🔑 SSH key retrieved successfully"
 
     - name: Download Plan and Cost Estimates
       uses: actions/download-artifact@v4
@@ -670,6 +765,8 @@ jobs:
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ env.ENVIRONMENT }}" \
+          -backend-config="key=terraform.tfstate" \
           -backend-config="use_azuread_auth=true"
 
     - name: Terraform Apply
@@ -783,13 +880,55 @@ jobs:
         echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
         echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
         echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+        echo "LOCATION=${{ github.event.inputs.location }}" >> $GITHUB_ENV
         
         # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}tfstate$(echo '${{ github.run_id }}' | tail -c 6)"
+        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}tfstates"
         RG_NAME="${{ github.event.inputs.resource_prefix }}-tfstate-rg"
+        KV_NAME="${{ github.event.inputs.resource_prefix }}-kv"
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+
+    - name: Retrieve SSH Key
+      run: |
+        # SSH key retrieval with GitHub Secrets priority
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          
+          # Validate SSH key format
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, retrieving from Azure Key Vault..."
+          
+          # Retrieve SSH key from Key Vault
+          echo "🔍 Retrieving SSH key from Key Vault: ${{ env.KV_NAME }}"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "${{ env.KV_NAME }}" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Retrieved SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "❌ SSH key not found in Key Vault. Please run terraform-validate job first to generate SSH key."
+            exit 1
+          fi
+        fi
+        
+        echo "🔑 SSH key retrieved successfully"
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
@@ -797,6 +936,8 @@ jobs:
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ env.ENVIRONMENT }}" \
+          -backend-config="key=terraform.tfstate" \
           -backend-config="use_azuread_auth=true"
 
     - name: Generate Pre-Destroy Cost Analysis
@@ -824,8 +965,9 @@ jobs:
           -var="vm_count=${{ env.VM_COUNT }}" \
           -var="vm_size=${{ env.VM_SIZE }}" \
           -var="environment=${{ env.ENVIRONMENT }}" \
-          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-          -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}"
+          -var="admin_ssh_public_key=${{ env.SSH_PUBLIC_KEY }}" \
+          -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          -var="tenant_id=${{ env.ARM_TENANT_ID }}"
         echo "✅ Infrastructure destruction completed"
 
     - name: Generate Destruction Summary
