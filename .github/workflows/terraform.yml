@@ -117,86 +117,6 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Setup SSH Key
-      run: |
-        # GitHub Actions SSH key management with Azure Key Vault fallback
-        # Priority: 1) GitHub Secrets, 2) Azure Key Vault, 3) Generate and store in Key Vault
-        
-        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
-          echo "✅ Using SSH key from GitHub Secrets"
-          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
-          
-          # Validate SSH key format
-          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
-            echo "❌ Invalid SSH public key format in GitHub Secrets"
-            exit 1
-          fi
-          
-          echo "🔑 SSH key from GitHub Secrets configured successfully"
-        else
-          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, checking Azure Key Vault..."
-          
-          # Set resource prefix from input or default
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
-          else
-            RESOURCE_PREFIX="omerzlikin"
-          fi
-          
-          # Try to get existing key from Azure Key Vault
-          KV_NAME="${RESOURCE_PREFIX}-kv"
-          RG_NAME="${RESOURCE_PREFIX}-rg-playground"
-          EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
-          
-          if [ -n "$EXISTING_KEY" ]; then
-            echo "✅ Using existing SSH key from Azure Key Vault: $KV_NAME"
-            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
-          else
-            echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
-            
-            # Generate SSH key
-            ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-github-$(date +%Y%m%d-%H%M)"
-            PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
-            
-            # Create resource group if it doesn't exist
-            az group create \
-              --name "$RG_NAME" \
-              --location "West Europe" \
-              --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=playground \
-              --output none || true
-            
-            # Create Key Vault if it doesn't exist
-            az keyvault create \
-              --name "$KV_NAME" \
-              --resource-group "$RG_NAME" \
-              --location "West Europe" \
-              --sku standard \
-              --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
-              --output none || true
-            
-            # Store in Azure Key Vault for future runs
-            az keyvault secret set \
-              --vault-name "$KV_NAME" \
-              --name "vm-ssh-public-key" \
-              --value "$PUBLIC_KEY" \
-              --description "SSH public key for Terraform-managed VMs (GitHub Actions)" \
-              --output none
-            
-            echo "✅ SSH key generated and stored in Key Vault: $KV_NAME"
-            echo "💡 For faster access, add this key to GitHub Secrets as VM_SSH_PUBLIC_KEY:"
-            echo "$PUBLIC_KEY"
-            echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
-          fi
-          
-          # Validate SSH key format
-          if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
-            echo "❌ Invalid SSH public key format"
-            exit 1
-          fi
-        fi
-        
-        echo "🔑 SSH key configured successfully"
-
     - name: Setup Terraform Backend
       run: |
         # Set resource prefix from input or default
@@ -296,6 +216,87 @@ jobs:
         echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
         echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
 
+
+# - name: Setup SSH Key
+#       run: |
+#         # GitHub Actions SSH key management with Azure Key Vault fallback
+#         # Priority: 1) GitHub Secrets, 2) Azure Key Vault, 3) Generate and store in Key Vault
+        
+#         if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+#           echo "✅ Using SSH key from GitHub Secrets"
+#           echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          
+#           # Validate SSH key format
+#           if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+#             echo "❌ Invalid SSH public key format in GitHub Secrets"
+#             exit 1
+#           fi
+          
+#           echo "🔑 SSH key from GitHub Secrets configured successfully"
+#         else
+#           echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, checking Azure Key Vault..."
+          
+#           # Set resource prefix from input or default
+#           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+#             RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+#           else
+#             RESOURCE_PREFIX="omerzlikin"
+#           fi
+          
+#           # Try to get existing key from Azure Key Vault
+#           KV_NAME="${RESOURCE_PREFIX}-kv"
+#           RG_NAME="${RESOURCE_PREFIX}-rg-playground"
+#           EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+#           if [ -n "$EXISTING_KEY" ]; then
+#             echo "✅ Using existing SSH key from Azure Key Vault: $KV_NAME"
+#             echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+#           else
+#             echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
+            
+#             # Generate SSH key
+#             ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-github-$(date +%Y%m%d-%H%M)"
+#             PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
+            
+#             # Create resource group if it doesn't exist
+#             az group create \
+#               --name "$RG_NAME" \
+#               --location "West Europe" \
+#               --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=playground \
+#               --output none || true
+            
+#             # Create Key Vault if it doesn't exist
+#             az keyvault create \
+#               --name "$KV_NAME" \
+#               --resource-group "$RG_NAME" \
+#               --location "West Europe" \
+#               --sku standard \
+#               --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
+#               --output none || true
+            
+#             # Store in Azure Key Vault for future runs
+#             az keyvault secret set \
+#               --vault-name "$KV_NAME" \
+#               --name "vm-ssh-public-key" \
+#               --value "$PUBLIC_KEY" \
+#               --description "SSH public key for Terraform-managed VMs (GitHub Actions)" \
+#               --output none
+            
+#             echo "✅ SSH key generated and stored in Key Vault: $KV_NAME"
+#             echo "💡 For faster access, add this key to GitHub Secrets as VM_SSH_PUBLIC_KEY:"
+#             echo "$PUBLIC_KEY"
+#             echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
+#           fi
+          
+#           # Validate SSH key format
+#           if [[ ! "$SSH_PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+#             echo "❌ Invalid SSH public key format"
+#             exit 1
+#           fi
+#         fi
+        
+#         echo "🔑 SSH key configured successfully"
+
     - name: Setup SSH Key
       run: |
         # Multi-platform SSH key management
@@ -314,8 +315,61 @@ jobs:
             RESOURCE_PREFIX="omerzlikin"
           fi
           
-          # Try to get existing key from Azure Key Vault
-          KV_NAME="${RESOURCE_PREFIX}-shared-kv"
+          KV_NAME="${RESOURCE_PREFIX}-kv"
+          
+          # First, ensure Key Vault exists with proper permissions
+          echo "🔧 Setting up Key Vault: $KV_NAME"
+          
+          # Create Key Vault if it doesn't exist
+          az keyvault create \
+            --name "$KV_NAME" \
+            --resource-group "${{ env.TFSTATE_RG_NAME }}" \
+            --location "${{ github.event.inputs.location }}" \
+            --sku standard \
+            --enable-rbac-authorization true \
+            --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
+            --output none || true
+          
+          # Get service principal object ID for RBAC
+          SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
+          KV_ID="$(az keyvault show --name "$KV_NAME" --resource-group "${{ env.TFSTATE_RG_NAME }}" --query id -o tsv)"
+          
+          # Assign Key Vault Secrets Officer role to service principal
+          echo "🔐 Setting up Key Vault RBAC permissions..."
+          if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$KV_ID" \
+            --query "[?roleDefinitionName=='Key Vault Secrets Officer'] | length(@)" -o tsv | grep -qx 1; then
+            
+            echo "Assigning Key Vault Secrets Officer role to service principal..."
+            
+            # Retry loop for role assignment (similar to storage account pattern)
+            for i in {1..10}; do
+              echo "Attempt to assign Key Vault Secrets Officer role ($i/10)..."
+              if az role assignment create \
+                --assignee-object-id "$SP_OBJ_ID" \
+                --assignee-principal-type ServicePrincipal \
+                --role "Key Vault Secrets Officer" \
+                --scope "$KV_ID" \
+                --output none 2>/dev/null; then
+                echo "✅ Role assignment successful"
+                break
+              else
+                echo "⚠️ Role assignment attempt $i failed, retrying in 3 seconds..."
+                sleep 3
+              fi
+              
+              # If this is the last attempt, show error but continue
+              if [ $i -eq 10 ]; then
+                echo "❌ Failed to assign role after 10 attempts, but continuing..."
+              fi
+            done
+            
+            # Wait for role assignment to propagate
+            echo "Waiting for RBAC permissions to propagate..."
+            sleep 5
+          fi
+          
+          # Now try to get existing key from Azure Key Vault (after permissions are set)
+          echo "🔍 Checking for existing SSH key in Key Vault..."
           EXISTING_KEY=$(az keyvault secret show --vault-name "$KV_NAME" --name "vm-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
           
           if [ -n "$EXISTING_KEY" ]; then
@@ -325,24 +379,48 @@ jobs:
             echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
             
             # Generate SSH key
-            ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-$(date +%Y%m%d-%H%M)"
+            ssh-keygen -t rsa -b 4096 -f ~/.ssh/terraform_key -N "" -C "terraform-github-$(date +%Y%m%d-%H%M)"
             PUBLIC_KEY=$(cat ~/.ssh/terraform_key.pub)
-            
-            # Create Key Vault if it doesn't exist
-            az keyvault create \
-              --name "$KV_NAME" \
-              --resource-group "${{ env.TFSTATE_RG_NAME }}" \
-              --location "${{ github.event.inputs.location }}" \
-              --sku standard \
-              --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
-              --output none 2>/dev/null || true
             
             # Store in Azure Key Vault for future runs
             az keyvault secret set \
               --vault-name "$KV_NAME" \
               --name "vm-ssh-public-key" \
               --value "$PUBLIC_KEY" \
-              --description "SSH public key for Terraform-managed VMs" \
+              --description "SSH public key for Terraform-managed VMs (GitHub Actions)" \
+              --output none
+            
+            echo "✅ SSH key generated and stored in Key Vault: $KV_NAME"
+            echo "💡 For faster access, add this key to GitHub Secrets as VM_SSH_PUBLIC_KEY:"
+            echo "$PUBLIC_KEY"
+            echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
+          fi
+            KV_ID="$(az keyvault show --name "$KV_NAME" --resource-group "${{ env.TFSTATE_RG_NAME }}" --query id -o tsv)"
+            
+            # Assign Key Vault Secrets Officer role to service principal
+            echo "🔐 Setting up Key Vault RBAC permissions..."
+            if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$KV_ID" \
+              --query "[?roleDefinitionName=='Key Vault Secrets Officer'] | length(@)" -o tsv | grep -qx 1; then
+              
+              echo "Assigning Key Vault Secrets Officer role to service principal..."
+              az role assignment create \
+                --assignee-object-id "$SP_OBJ_ID" \
+                --assignee-principal-type ServicePrincipal \
+                --role "Key Vault Secrets Officer" \
+                --scope "$KV_ID" \
+                --output none || true
+              
+              # Wait for role assignment to propagate
+              echo "Waiting for RBAC permissions to propagate..."
+              sleep 10
+            fi
+            
+            # Store in Azure Key Vault for future runs
+            az keyvault secret set \
+              --vault-name "$KV_NAME" \
+              --name "vm-ssh-public-key" \
+              --value "$PUBLIC_KEY" \
+              --description "SSH public key for Terraform-managed VMs (GitHub Actions)" \
               --output none
             
             echo "✅ SSH key generated and stored in Key Vault: $KV_NAME"
@@ -661,12 +739,12 @@ jobs:
     - name: Setup VM Scheduling
       run: |
         # Configure advanced VM scheduling
-        RG_NAME="${{ env.RESOURCE_PREFIX }}-rg-playground"
+        #RG_NAME="${{ env.RESOURCE_PREFIX }}-rg-playground"
         LOCATION="${{ github.event.inputs.location }}"
         
         # Create Function App for Hungarian holidays and work hours scheduling
         az functionapp create \
-          --resource-group $RG_NAME \
+          --resource-group ${{ env.TFSTATE_RG_NAME }} \
           --consumption-plan-location "$LOCATION" \
           --runtime python \
           --runtime-version 3.9 \

@@ -125,8 +125,30 @@ stages:
               --resource-group "$RG_NAME" \
               --location "West Europe" \
               --sku standard \
+              --enable-rbac-authorization true \
               --tags owner=${RESOURCE_PREFIX} createdBy=terraform purpose=ssh-keys \
               --output none || true
+            
+            # Get service principal object ID for RBAC (Azure DevOps uses MSI)
+            CURRENT_SP_ID=$(az account show --query user.name -o tsv)
+            KV_ID="$(az keyvault show --name "$KV_NAME" --resource-group "$RG_NAME" --query id -o tsv)"
+            
+            # Assign Key Vault Secrets Officer role to current service principal
+            echo "🔐 Setting up Key Vault RBAC permissions for Azure DevOps..."
+            if ! az role assignment list --assignee "$CURRENT_SP_ID" --scope "$KV_ID" \
+              --query "[?roleDefinitionName=='Key Vault Secrets Officer'] | length(@)" -o tsv | grep -qx 1; then
+              
+              echo "Assigning Key Vault Secrets Officer role..."
+              az role assignment create \
+                --assignee "$CURRENT_SP_ID" \
+                --role "Key Vault Secrets Officer" \
+                --scope "$KV_ID" \
+                --output none || true
+              
+              # Wait for role assignment to propagate
+              echo "Waiting for RBAC permissions to propagate..."
+              sleep 10
+            fi
             
             # Store in Azure Key Vault for future runs
             az keyvault secret set \
