@@ -7,12 +7,18 @@ on:
       - develop
       - az_payground/**
     paths:
-      - 'az_payground/**'
+      - '*.tf'
+      - '*.tfvars'
+      - 'modules/**'
+      - '.github/workflows/terraform.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'az_payground/**'
+      - '*.tf'
+      - '*.tfvars'
+      - 'modules/**'
+      - '.github/workflows/terraform.yml'
   workflow_dispatch:
     inputs:
       pool_type:
