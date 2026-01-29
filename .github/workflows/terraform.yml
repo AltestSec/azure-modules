@@ -450,6 +450,10 @@ jobs:
           echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
           echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
           echo "LOCATION=${{ github.event.inputs.location }}" >> $GITHUB_ENV
+          
+          # Set local variables for storage naming
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
         else
           echo "POOL_TYPE=web" >> $GITHUB_ENV
           echo "VM_COUNT=2" >> $GITHUB_ENV
@@ -458,24 +462,28 @@ jobs:
           echo "RESOURCE_PREFIX=omerzlikin" >> $GITHUB_ENV
           echo "DUE_DATE=2026-02-12" >> $GITHUB_ENV
           echo "LOCATION=westeurope" >> $GITHUB_ENV
+          
+          # Set local variables for storage naming
+          RESOURCE_PREFIX="omerzlikin"
+          ENVIRONMENT="dev"
         fi
         
-        RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
-        echo "RESOURCE_PREFIX: ${{ github.event.inputs.resource_prefix }}"
-        echo "RESOURCE_PREFIX: $RESOURCE_PREFIX"
-        echo "RESOURCE_PREFIX: ${{ env.RESOURCE_PREFIX }}"
-        echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
-        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-        STORAGE_NAME="${{ env.RESOURCE_PREFIX }}tfstates"
-        echo "STORAGE_NAME: $STORAGE_NAME"
-        RG_NAME="${{ env.RESOURCE_PREFIX }}-tfstate-rg"
-        echo "RG_NAME: $RG_NAME"
-        KV_NAME="${{ env.RESOURCE_PREFIX }}-kv"
-        echo "KV_NAME: $KV_NAME"
+        # Use local variables (not env variables) for immediate use
+        STORAGE_NAME="${RESOURCE_PREFIX}tfstates"
+        RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
+        KV_NAME="${RESOURCE_PREFIX}-kv"
         
+        # Set storage-related environment variables
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
         echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+        
+        # Debug output
+        echo "Event: ${{ github.event_name }}"
+        echo "Resource Prefix: $RESOURCE_PREFIX"
+        echo "Storage Account: $STORAGE_NAME"
+        echo "Resource Group: $RG_NAME"
+        echo "Key Vault: $KV_NAME"
 
     - name: Retrieve SSH Key
       run: |
