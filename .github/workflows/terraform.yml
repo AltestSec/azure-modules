@@ -265,14 +265,17 @@ jobs:
         echo "🔧 Creating Key Vault: ${{ env.KV_NAME }}"
         
         # Create Key Vault if it doesn't exist
-        az keyvault create \
-          --name "${{ env.KV_NAME }}" \
-          --resource-group "${{ env.TFSTATE_RG_NAME }}" \
-          --location "${{ env.LOCATION }}" \
-          --sku standard \
-          --enable-rbac-authorization true \
-          --tags owner=${{ env.RESOURCE_PREFIX }} createdBy=terraform purpose=ssh-keys \
-          --output none || true
+        IfNOKV="$(az keyvault show --name "${{ env.KV_NAME }}" --resource-group "${{ env.TFSTATE_RG_NAME }}" --query id -o tsv)"
+        if ! $?=="3"; then
+          az keyvault create \
+            --name "${{ env.KV_NAME }}" \
+            --resource-group "${{ env.TFSTATE_RG_NAME }}" \
+            --location "${{ env.LOCATION }}" \
+            --sku standard \
+            --enable-rbac-authorization true \
+            --tags owner=${{ env.RESOURCE_PREFIX }} createdBy=terraform purpose=ssh-keys \
+            --output none || true
+        fi
         
         # Get service principal object ID for RBAC
         SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"

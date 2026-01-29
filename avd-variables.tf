@@ -99,11 +99,11 @@ variable "domain_join_password" {
 }
 
 # Auto-shutdown Configuration
-variable "auto_shutdown_enabled" {
-  description = "Enable auto-shutdown for session hosts"
-  type        = bool
-  default     = true
-}
+#variable "auto_shutdown_enabled" {
+#  description = "Enable auto-shutdown for session hosts"
+#  type        = bool
+#  default     = true
+#}
 
 # Image Building Configuration
 variable "enable_image_building" {

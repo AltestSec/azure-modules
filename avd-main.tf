@@ -350,7 +350,7 @@ module "avd_sessionhosts_dev_eu" {
   domain_name                = var.domain_name
   domain_join_username       = var.domain_join_username
   domain_join_password       = var.domain_join_password
-  auto_shutdown_enabled      = var.auto_shutdown_enabled
+  #auto_shutdown_enabled      = var.auto_shutdown_enabled
   shutdown_time              = local.pool_configs.dev_eu.shutdown_time
   timezone                   = local.pool_configs.dev_eu.timezone
   tags                       = local.common_tags
@@ -379,7 +379,7 @@ module "avd_sessionhosts_dev_us" {
   domain_name                = var.domain_name
   domain_join_username       = var.domain_join_username
   domain_join_password       = var.domain_join_password
-  auto_shutdown_enabled      = var.auto_shutdown_enabled
+  #auto_shutdown_enabled      = var.auto_shutdown_enabled
   shutdown_time              = local.pool_configs.dev_us.shutdown_time
   timezone                   = local.pool_configs.dev_us.timezone
   tags                       = local.common_tags
@@ -408,7 +408,7 @@ module "avd_sessionhosts_mgmt_us" {
   domain_name                = var.domain_name
   domain_join_username       = var.domain_join_username
   domain_join_password       = var.domain_join_password
-  auto_shutdown_enabled      = var.auto_shutdown_enabled
+  #auto_shutdown_enabled      = var.auto_shutdown_enabled
   shutdown_time              = local.pool_configs.mgmt_us.shutdown_time
   timezone                   = local.pool_configs.mgmt_us.timezone
   tags                       = local.common_tags
