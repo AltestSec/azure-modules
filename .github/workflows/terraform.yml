@@ -390,79 +390,6 @@ jobs:
         
         echo "🔑 SSH key configured successfully"
 
-    # - name: Setup Terraform Backend
-    #   run: |
-    #     # Set resource prefix from input or default
-    #     if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-    #       RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
-    #       DUE_DATE="${{ github.event.inputs.due_date }}"
-    #     else
-    #       RESOURCE_PREFIX="omerzlikin"
-    #       DUE_DATE="2026-02-12"
-    #     fi
-        
-    #     LOCATION="${{ github.event.inputs.location }}"
-    #     # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-    #     STORAGE_NAME="${RESOURCE_PREFIX}tfstates"
-    #     RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
-        
-    #     echo "Creating Terraform state storage with prefix: $RESOURCE_PREFIX"
-    #     echo "Storage account: $STORAGE_NAME"
-    #     echo "Resource group: $RG_NAME"
-    #     echo "Due date: $DUE_DATE"
-        
-    #     # Create resource group for Terraform state
-    #     az group create --name "$RG_NAME" --location "$LOCATION" --output none || true
-        
-    #     # Create storage account with versioning and RBAC
-    #     az storage account create \
-    #       --name "$STORAGE_NAME" \
-    #       --resource-group "$RG_NAME" \
-    #       --location "$LOCATION" \
-    #       --sku Standard_LRS \
-    #       --kind StorageV2 \
-    #       --allow-blob-public-access false \
-    #       --tags owner=${RESOURCE_PREFIX} createdBy=terraform dueDate="$DUE_DATE" \
-    #       --output none || true
-
-    #     az storage account blob-service-properties update \
-    #       --resource-group "$RG_NAME" \
-    #       --account-name "$STORAGE_NAME" \
-    #       --enable-versioning true
-        
-    #     # Create container for Terraform state
-    #     az storage container create \
-    #       --name tfstate \
-    #       --account-name "$STORAGE_NAME" \
-    #       --auth-mode login \
-    #       --output none || true
-        
-    #     # Get service principal object ID for RBAC
-    #     SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
-    #     SA_ID="$(az storage account show -g "$RG_NAME" -n "$STORAGE_NAME" --query id -o tsv)"
-
-    #     # Create role assignment only if missing
-    #     if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
-    #       --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
-    #       for i in {1..30}; do
-    #         echo "Attempt to assign Storage Blob Data Contributor role ($i/30)..."
-    #         if az role assignment create \
-    #           --assignee-object-id "$SP_OBJ_ID" \
-    #           --assignee-principal-type ServicePrincipal \
-    #           --role "Storage Blob Data Contributor" \
-    #           --scope "$SA_ID" \
-    #           --output none 2>/dev/null; then
-    #           echo "✅ Role assignment successful"
-    #           break
-    #         fi
-    #         sleep 5
-    #       done
-    #     fi
-        
-    #     echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
-    #     echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
-    #     echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
-    #     echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
@@ -533,10 +460,18 @@ jobs:
           echo "LOCATION=westeurope" >> $GITHUB_ENV
         fi
         
+        RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+        echo "RESOURCE_PREFIX: ${{ github.event.inputs.resource_prefix }}"
+        echo "RESOURCE_PREFIX: $RESOURCE_PREFIX"
+        echo "RESOURCE_PREFIX: ${{ env.RESOURCE_PREFIX }}"
+        echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
         # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
         STORAGE_NAME="${{ env.RESOURCE_PREFIX }}tfstates"
+        echo "STORAGE_NAME: $STORAGE_NAME"
         RG_NAME="${{ env.RESOURCE_PREFIX }}-tfstate-rg"
+        echo "RG_NAME: $RG_NAME"
         KV_NAME="${{ env.RESOURCE_PREFIX }}-kv"
+        echo "KV_NAME: $KV_NAME"
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
