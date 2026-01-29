@@ -491,7 +491,7 @@ jobs:
       github.ref == 'refs/heads/main' || 
       github.ref == 'refs/heads/develop' ||
       startsWith(github.ref, 'refs/heads/az_payground/')
-    ))
+      )
     
     steps:
     - name: Checkout
