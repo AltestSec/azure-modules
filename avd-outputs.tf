@@ -125,26 +125,26 @@ output "avd_deployment_summary" {
     total_session_hosts = var.dev_pool_size_eu + var.dev_pool_size_us + var.mgmt_pool_size_us
     pools = {
       dev_eu = {
-        location     = var.primary_location
-        vm_size      = var.dev_vm_size
-        host_count   = var.dev_pool_size_eu
-        image_type   = "Development"
+        location   = var.primary_location
+        vm_size    = var.dev_vm_size
+        host_count = var.dev_pool_size_eu
+        image_type = "Development"
       }
       dev_us = {
-        location     = var.secondary_location
-        vm_size      = var.dev_vm_size
-        host_count   = var.dev_pool_size_us
-        image_type   = "Development"
+        location   = var.secondary_location
+        vm_size    = var.dev_vm_size
+        host_count = var.dev_pool_size_us
+        image_type = "Development"
       }
       mgmt_us = {
-        location     = var.secondary_location
-        vm_size      = var.mgmt_vm_size
-        host_count   = var.mgmt_pool_size_us
-        image_type   = "Management"
+        location   = var.secondary_location
+        vm_size    = var.mgmt_vm_size
+        host_count = var.mgmt_pool_size_us
+        image_type = "Management"
       }
     }
     features = {
-      auto_shutdown        = var.auto_shutdown_enabled
+      auto_shutdown       = var.auto_shutdown_enabled
       aad_join            = var.use_aad_join
       custom_images       = true
       security_scanning   = var.enable_security_scanning

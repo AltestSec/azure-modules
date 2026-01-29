@@ -44,7 +44,7 @@ variable "host_pool_type" {
   description = "Type of host pool (Pooled or Personal)"
   type        = string
   default     = "Pooled"
-  
+
   validation {
     condition     = contains(["Pooled", "Personal"], var.host_pool_type)
     error_message = "Host pool type must be either 'Pooled' or 'Personal'."
@@ -55,7 +55,7 @@ variable "load_balancer_type" {
   description = "Load balancer type for the host pool"
   type        = string
   default     = "DepthFirst"
-  
+
   validation {
     condition     = contains(["BreadthFirst", "DepthFirst"], var.load_balancer_type)
     error_message = "Load balancer type must be either 'BreadthFirst' or 'DepthFirst'."
@@ -66,7 +66,7 @@ variable "application_group_type" {
   description = "Type of application group"
   type        = string
   default     = "Desktop"
-  
+
   validation {
     condition     = contains(["Desktop", "RemoteApp"], var.application_group_type)
     error_message = "Application group type must be either 'Desktop' or 'RemoteApp'."
@@ -77,7 +77,7 @@ variable "personal_desktop_assignment_type" {
   description = "Assignment type for personal desktops"
   type        = string
   default     = "Automatic"
-  
+
   validation {
     condition     = contains(["Automatic", "Direct"], var.personal_desktop_assignment_type)
     error_message = "Personal desktop assignment type must be either 'Automatic' or 'Direct'."

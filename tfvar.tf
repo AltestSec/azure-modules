@@ -43,7 +43,7 @@ variable "pool_type" {
   description = "Type of pool for VMs (web, api, worker)"
   type        = string
   default     = "web"
-  
+
   validation {
     condition     = contains(["web", "api", "worker"], var.pool_type)
     error_message = "Pool type must be one of: web, api, worker."

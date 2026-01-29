@@ -139,8 +139,8 @@ resource "azurerm_linux_virtual_machine" "main" {
   }
 
   tags = {
-    Environment = var.environment
-    PoolType    = var.pool_type
+    Environment  = var.environment
+    PoolType     = var.pool_type
     AutoShutdown = var.auto_shutdown_enabled
   }
 }
@@ -169,6 +169,6 @@ module "sbus" {
   source = "./modules/sbus"
 
   resource_group_name = azurerm_resource_group.main.name
-  location           = azurerm_resource_group.main.location
-  environment        = var.environment
+  location            = azurerm_resource_group.main.location
+  environment         = var.environment
 }

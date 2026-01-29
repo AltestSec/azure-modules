@@ -4,12 +4,12 @@
 locals {
   # Common tags for all resources
   common_tags = {
-    Environment   = var.environment
-    Project       = "AVD-Infrastructure"
-    ManagedBy     = "Terraform"
-    CostCenter    = var.cost_center
-    Owner         = var.owner
-    CreatedDate   = formatdate("YYYY-MM-DD", timestamp())
+    Environment = var.environment
+    Project     = "AVD-Infrastructure"
+    ManagedBy   = "Terraform"
+    CostCenter  = var.cost_center
+    Owner       = var.owner
+    CreatedDate = formatdate("YYYY-MM-DD", timestamp())
   }
 
   # Location mappings
@@ -29,61 +29,61 @@ locals {
   # Pool configurations
   pool_configs = {
     dev_eu = {
-      location              = var.primary_location
-      location_short        = local.locations.primary.short_name
-      pool_name            = "dev"
-      pool_display_name    = "Development Pool ${upper(local.locations.primary.short_name)}"
-      pool_type            = "development"
-      vm_size              = var.dev_vm_size
-      session_host_count   = var.dev_pool_size_eu
-      host_pool_type       = "Pooled"
-      max_sessions         = 4
-      use_custom_image     = true
-      custom_image_name    = "avd-dev-image"
-      timezone             = local.locations.primary.timezone
-      work_hours_start     = "09:00"
-      peak_hours_start     = "10:00"
-      ramp_down_start      = "18:00"
-      off_peak_start       = "22:00"
-      shutdown_time        = "19:00"
+      location           = var.primary_location
+      location_short     = local.locations.primary.short_name
+      pool_name          = "dev"
+      pool_display_name  = "Development Pool ${upper(local.locations.primary.short_name)}"
+      pool_type          = "development"
+      vm_size            = var.dev_vm_size
+      session_host_count = var.dev_pool_size_eu
+      host_pool_type     = "Pooled"
+      max_sessions       = 4
+      use_custom_image   = true
+      custom_image_name  = "avd-dev-image"
+      timezone           = local.locations.primary.timezone
+      work_hours_start   = "09:00"
+      peak_hours_start   = "10:00"
+      ramp_down_start    = "18:00"
+      off_peak_start     = "22:00"
+      shutdown_time      = "19:00"
     }
     dev_us = {
-      location              = var.secondary_location
-      location_short        = local.locations.secondary.short_name
-      pool_name            = "dev"
-      pool_display_name    = "Development Pool ${upper(local.locations.secondary.short_name)}"
-      pool_type            = "development"
-      vm_size              = var.dev_vm_size
-      session_host_count   = var.dev_pool_size_us
-      host_pool_type       = "Pooled"
-      max_sessions         = 4
-      use_custom_image     = true
-      custom_image_name    = "avd-dev-image"
-      timezone             = local.locations.secondary.timezone
-      work_hours_start     = "09:00"
-      peak_hours_start     = "10:00"
-      ramp_down_start      = "18:00"
-      off_peak_start       = "22:00"
-      shutdown_time        = "19:00"
+      location           = var.secondary_location
+      location_short     = local.locations.secondary.short_name
+      pool_name          = "dev"
+      pool_display_name  = "Development Pool ${upper(local.locations.secondary.short_name)}"
+      pool_type          = "development"
+      vm_size            = var.dev_vm_size
+      session_host_count = var.dev_pool_size_us
+      host_pool_type     = "Pooled"
+      max_sessions       = 4
+      use_custom_image   = true
+      custom_image_name  = "avd-dev-image"
+      timezone           = local.locations.secondary.timezone
+      work_hours_start   = "09:00"
+      peak_hours_start   = "10:00"
+      ramp_down_start    = "18:00"
+      off_peak_start     = "22:00"
+      shutdown_time      = "19:00"
     }
     mgmt_us = {
-      location              = var.secondary_location
-      location_short        = local.locations.secondary.short_name
-      pool_name            = "mgmt"
-      pool_display_name    = "Management Pool ${upper(local.locations.secondary.short_name)}"
-      pool_type            = "management"
-      vm_size              = var.mgmt_vm_size
-      session_host_count   = var.mgmt_pool_size_us
-      host_pool_type       = "Pooled"
-      max_sessions         = 6
-      use_custom_image     = true
-      custom_image_name    = "avd-mgmt-image"
-      timezone             = local.locations.secondary.timezone
-      work_hours_start     = "08:00"
-      peak_hours_start     = "09:00"
-      ramp_down_start      = "17:00"
-      off_peak_start       = "20:00"
-      shutdown_time        = "18:00"
+      location           = var.secondary_location
+      location_short     = local.locations.secondary.short_name
+      pool_name          = "mgmt"
+      pool_display_name  = "Management Pool ${upper(local.locations.secondary.short_name)}"
+      pool_type          = "management"
+      vm_size            = var.mgmt_vm_size
+      session_host_count = var.mgmt_pool_size_us
+      host_pool_type     = "Pooled"
+      max_sessions       = 6
+      use_custom_image   = true
+      custom_image_name  = "avd-mgmt-image"
+      timezone           = local.locations.secondary.timezone
+      work_hours_start   = "08:00"
+      peak_hours_start   = "09:00"
+      ramp_down_start    = "17:00"
+      off_peak_start     = "20:00"
+      shutdown_time      = "18:00"
     }
   }
 }
@@ -228,7 +228,7 @@ resource "azurerm_subnet_network_security_group_association" "avd_us" {
 module "shared_image_gallery" {
   source = "./modules/shared-image-gallery"
 
-  resource_group_name         = azurerm_resource_group.avd_eu.name
+  resource_group_name        = azurerm_resource_group.avd_eu.name
   location                   = azurerm_resource_group.avd_eu.location
   location_short             = local.locations.primary.short_name
   environment                = var.environment
@@ -246,170 +246,170 @@ module "avd_workspace_eu" {
   source = "./modules/avd-workspace"
 
   resource_group_name = azurerm_resource_group.avd_eu.name
-  location           = azurerm_resource_group.avd_eu.location
-  location_short     = local.locations.primary.short_name
-  environment        = var.environment
-  tags               = local.common_tags
+  location            = azurerm_resource_group.avd_eu.location
+  location_short      = local.locations.primary.short_name
+  environment         = var.environment
+  tags                = local.common_tags
 }
 
 module "avd_workspace_us" {
   source = "./modules/avd-workspace"
 
   resource_group_name = azurerm_resource_group.avd_us.name
-  location           = azurerm_resource_group.avd_us.location
-  location_short     = local.locations.secondary.short_name
-  environment        = var.environment
-  tags               = local.common_tags
+  location            = azurerm_resource_group.avd_us.location
+  location_short      = local.locations.secondary.short_name
+  environment         = var.environment
+  tags                = local.common_tags
 }
 
 # AVD Host Pools
 module "avd_hostpool_dev_eu" {
   source = "./modules/avd-hostpool"
 
-  resource_group_name           = azurerm_resource_group.avd_eu.name
-  location                     = azurerm_resource_group.avd_eu.location
-  location_short               = local.pool_configs.dev_eu.location_short
-  environment                  = var.environment
-  pool_name                    = local.pool_configs.dev_eu.pool_name
-  pool_display_name            = local.pool_configs.dev_eu.pool_display_name
-  workspace_id                 = module.avd_workspace_eu.workspace_id
-  log_analytics_workspace_id   = module.avd_workspace_eu.log_analytics_workspace_id
-  host_pool_type              = local.pool_configs.dev_eu.host_pool_type
-  maximum_sessions_allowed     = local.pool_configs.dev_eu.max_sessions
-  timezone                    = local.pool_configs.dev_eu.timezone
-  work_hours_start            = local.pool_configs.dev_eu.work_hours_start
-  peak_hours_start            = local.pool_configs.dev_eu.peak_hours_start
-  ramp_down_start             = local.pool_configs.dev_eu.ramp_down_start
-  off_peak_start              = local.pool_configs.dev_eu.off_peak_start
-  tags                        = local.common_tags
+  resource_group_name        = azurerm_resource_group.avd_eu.name
+  location                   = azurerm_resource_group.avd_eu.location
+  location_short             = local.pool_configs.dev_eu.location_short
+  environment                = var.environment
+  pool_name                  = local.pool_configs.dev_eu.pool_name
+  pool_display_name          = local.pool_configs.dev_eu.pool_display_name
+  workspace_id               = module.avd_workspace_eu.workspace_id
+  log_analytics_workspace_id = module.avd_workspace_eu.log_analytics_workspace_id
+  host_pool_type             = local.pool_configs.dev_eu.host_pool_type
+  maximum_sessions_allowed   = local.pool_configs.dev_eu.max_sessions
+  timezone                   = local.pool_configs.dev_eu.timezone
+  work_hours_start           = local.pool_configs.dev_eu.work_hours_start
+  peak_hours_start           = local.pool_configs.dev_eu.peak_hours_start
+  ramp_down_start            = local.pool_configs.dev_eu.ramp_down_start
+  off_peak_start             = local.pool_configs.dev_eu.off_peak_start
+  tags                       = local.common_tags
 }
 
 module "avd_hostpool_dev_us" {
   source = "./modules/avd-hostpool"
 
-  resource_group_name           = azurerm_resource_group.avd_us.name
-  location                     = azurerm_resource_group.avd_us.location
-  location_short               = local.pool_configs.dev_us.location_short
-  environment                  = var.environment
-  pool_name                    = local.pool_configs.dev_us.pool_name
-  pool_display_name            = local.pool_configs.dev_us.pool_display_name
-  workspace_id                 = module.avd_workspace_us.workspace_id
-  log_analytics_workspace_id   = module.avd_workspace_us.log_analytics_workspace_id
-  host_pool_type              = local.pool_configs.dev_us.host_pool_type
-  maximum_sessions_allowed     = local.pool_configs.dev_us.max_sessions
-  timezone                    = local.pool_configs.dev_us.timezone
-  work_hours_start            = local.pool_configs.dev_us.work_hours_start
-  peak_hours_start            = local.pool_configs.dev_us.peak_hours_start
-  ramp_down_start             = local.pool_configs.dev_us.ramp_down_start
-  off_peak_start              = local.pool_configs.dev_us.off_peak_start
-  tags                        = local.common_tags
+  resource_group_name        = azurerm_resource_group.avd_us.name
+  location                   = azurerm_resource_group.avd_us.location
+  location_short             = local.pool_configs.dev_us.location_short
+  environment                = var.environment
+  pool_name                  = local.pool_configs.dev_us.pool_name
+  pool_display_name          = local.pool_configs.dev_us.pool_display_name
+  workspace_id               = module.avd_workspace_us.workspace_id
+  log_analytics_workspace_id = module.avd_workspace_us.log_analytics_workspace_id
+  host_pool_type             = local.pool_configs.dev_us.host_pool_type
+  maximum_sessions_allowed   = local.pool_configs.dev_us.max_sessions
+  timezone                   = local.pool_configs.dev_us.timezone
+  work_hours_start           = local.pool_configs.dev_us.work_hours_start
+  peak_hours_start           = local.pool_configs.dev_us.peak_hours_start
+  ramp_down_start            = local.pool_configs.dev_us.ramp_down_start
+  off_peak_start             = local.pool_configs.dev_us.off_peak_start
+  tags                       = local.common_tags
 }
 
 module "avd_hostpool_mgmt_us" {
   source = "./modules/avd-hostpool"
 
-  resource_group_name           = azurerm_resource_group.avd_us.name
-  location                     = azurerm_resource_group.avd_us.location
-  location_short               = local.pool_configs.mgmt_us.location_short
-  environment                  = var.environment
-  pool_name                    = local.pool_configs.mgmt_us.pool_name
-  pool_display_name            = local.pool_configs.mgmt_us.pool_display_name
-  workspace_id                 = module.avd_workspace_us.workspace_id
-  log_analytics_workspace_id   = module.avd_workspace_us.log_analytics_workspace_id
-  host_pool_type              = local.pool_configs.mgmt_us.host_pool_type
-  maximum_sessions_allowed     = local.pool_configs.mgmt_us.max_sessions
-  timezone                    = local.pool_configs.mgmt_us.timezone
-  work_hours_start            = local.pool_configs.mgmt_us.work_hours_start
-  peak_hours_start            = local.pool_configs.mgmt_us.peak_hours_start
-  ramp_down_start             = local.pool_configs.mgmt_us.ramp_down_start
-  off_peak_start              = local.pool_configs.mgmt_us.off_peak_start
-  tags                        = local.common_tags
+  resource_group_name        = azurerm_resource_group.avd_us.name
+  location                   = azurerm_resource_group.avd_us.location
+  location_short             = local.pool_configs.mgmt_us.location_short
+  environment                = var.environment
+  pool_name                  = local.pool_configs.mgmt_us.pool_name
+  pool_display_name          = local.pool_configs.mgmt_us.pool_display_name
+  workspace_id               = module.avd_workspace_us.workspace_id
+  log_analytics_workspace_id = module.avd_workspace_us.log_analytics_workspace_id
+  host_pool_type             = local.pool_configs.mgmt_us.host_pool_type
+  maximum_sessions_allowed   = local.pool_configs.mgmt_us.max_sessions
+  timezone                   = local.pool_configs.mgmt_us.timezone
+  work_hours_start           = local.pool_configs.mgmt_us.work_hours_start
+  peak_hours_start           = local.pool_configs.mgmt_us.peak_hours_start
+  ramp_down_start            = local.pool_configs.mgmt_us.ramp_down_start
+  off_peak_start             = local.pool_configs.mgmt_us.off_peak_start
+  tags                       = local.common_tags
 }
 
 # AVD Session Hosts
 module "avd_sessionhosts_dev_eu" {
   source = "./modules/avd-sessionhosts"
 
-  resource_group_name         = azurerm_resource_group.avd_eu.name
-  location                   = azurerm_resource_group.avd_eu.location
-  pool_name                  = local.pool_configs.dev_eu.pool_name
-  pool_type                  = local.pool_configs.dev_eu.pool_type
-  subnet_id                  = azurerm_subnet.avd_hosts_eu.id
-  session_host_count         = local.pool_configs.dev_eu.session_host_count
-  vm_size                    = local.pool_configs.dev_eu.vm_size
-  admin_username             = var.avd_admin_username
-  admin_password             = var.avd_admin_password
-  use_custom_image           = local.pool_configs.dev_eu.use_custom_image
-  custom_image_name          = local.pool_configs.dev_eu.custom_image_name
-  shared_image_gallery_name  = module.shared_image_gallery.shared_image_gallery_name
-  shared_image_gallery_rg    = azurerm_resource_group.avd_eu.name
-  host_pool_name             = module.avd_hostpool_dev_eu.host_pool_name
-  host_pool_token            = module.avd_hostpool_dev_eu.host_pool_token
-  aad_join                   = var.use_aad_join
-  domain_join_enabled        = var.domain_join_enabled
-  domain_name                = var.domain_name
-  domain_join_username       = var.domain_join_username
-  domain_join_password       = var.domain_join_password
+  resource_group_name       = azurerm_resource_group.avd_eu.name
+  location                  = azurerm_resource_group.avd_eu.location
+  pool_name                 = local.pool_configs.dev_eu.pool_name
+  pool_type                 = local.pool_configs.dev_eu.pool_type
+  subnet_id                 = azurerm_subnet.avd_hosts_eu.id
+  session_host_count        = local.pool_configs.dev_eu.session_host_count
+  vm_size                   = local.pool_configs.dev_eu.vm_size
+  admin_username            = var.avd_admin_username
+  admin_password            = var.avd_admin_password
+  use_custom_image          = local.pool_configs.dev_eu.use_custom_image
+  custom_image_name         = local.pool_configs.dev_eu.custom_image_name
+  shared_image_gallery_name = module.shared_image_gallery.shared_image_gallery_name
+  shared_image_gallery_rg   = azurerm_resource_group.avd_eu.name
+  host_pool_name            = module.avd_hostpool_dev_eu.host_pool_name
+  host_pool_token           = module.avd_hostpool_dev_eu.host_pool_token
+  aad_join                  = var.use_aad_join
+  domain_join_enabled       = var.domain_join_enabled
+  domain_name               = var.domain_name
+  domain_join_username      = var.domain_join_username
+  domain_join_password      = var.domain_join_password
   #auto_shutdown_enabled      = var.auto_shutdown_enabled
-  shutdown_time              = local.pool_configs.dev_eu.shutdown_time
-  timezone                   = local.pool_configs.dev_eu.timezone
-  tags                       = local.common_tags
+  shutdown_time = local.pool_configs.dev_eu.shutdown_time
+  timezone      = local.pool_configs.dev_eu.timezone
+  tags          = local.common_tags
 }
 
 module "avd_sessionhosts_dev_us" {
   source = "./modules/avd-sessionhosts"
 
-  resource_group_name         = azurerm_resource_group.avd_us.name
-  location                   = azurerm_resource_group.avd_us.location
-  pool_name                  = local.pool_configs.dev_us.pool_name
-  pool_type                  = local.pool_configs.dev_us.pool_type
-  subnet_id                  = azurerm_subnet.avd_hosts_us.id
-  session_host_count         = local.pool_configs.dev_us.session_host_count
-  vm_size                    = local.pool_configs.dev_us.vm_size
-  admin_username             = var.avd_admin_username
-  admin_password             = var.avd_admin_password
-  use_custom_image           = local.pool_configs.dev_us.use_custom_image
-  custom_image_name          = local.pool_configs.dev_us.custom_image_name
-  shared_image_gallery_name  = module.shared_image_gallery.shared_image_gallery_name
-  shared_image_gallery_rg    = azurerm_resource_group.avd_eu.name
-  host_pool_name             = module.avd_hostpool_dev_us.host_pool_name
-  host_pool_token            = module.avd_hostpool_dev_us.host_pool_token
-  aad_join                   = var.use_aad_join
-  domain_join_enabled        = var.domain_join_enabled
-  domain_name                = var.domain_name
-  domain_join_username       = var.domain_join_username
-  domain_join_password       = var.domain_join_password
+  resource_group_name       = azurerm_resource_group.avd_us.name
+  location                  = azurerm_resource_group.avd_us.location
+  pool_name                 = local.pool_configs.dev_us.pool_name
+  pool_type                 = local.pool_configs.dev_us.pool_type
+  subnet_id                 = azurerm_subnet.avd_hosts_us.id
+  session_host_count        = local.pool_configs.dev_us.session_host_count
+  vm_size                   = local.pool_configs.dev_us.vm_size
+  admin_username            = var.avd_admin_username
+  admin_password            = var.avd_admin_password
+  use_custom_image          = local.pool_configs.dev_us.use_custom_image
+  custom_image_name         = local.pool_configs.dev_us.custom_image_name
+  shared_image_gallery_name = module.shared_image_gallery.shared_image_gallery_name
+  shared_image_gallery_rg   = azurerm_resource_group.avd_eu.name
+  host_pool_name            = module.avd_hostpool_dev_us.host_pool_name
+  host_pool_token           = module.avd_hostpool_dev_us.host_pool_token
+  aad_join                  = var.use_aad_join
+  domain_join_enabled       = var.domain_join_enabled
+  domain_name               = var.domain_name
+  domain_join_username      = var.domain_join_username
+  domain_join_password      = var.domain_join_password
   #auto_shutdown_enabled      = var.auto_shutdown_enabled
-  shutdown_time              = local.pool_configs.dev_us.shutdown_time
-  timezone                   = local.pool_configs.dev_us.timezone
-  tags                       = local.common_tags
+  shutdown_time = local.pool_configs.dev_us.shutdown_time
+  timezone      = local.pool_configs.dev_us.timezone
+  tags          = local.common_tags
 }
 
 module "avd_sessionhosts_mgmt_us" {
   source = "./modules/avd-sessionhosts"
 
-  resource_group_name         = azurerm_resource_group.avd_us.name
-  location                   = azurerm_resource_group.avd_us.location
-  pool_name                  = local.pool_configs.mgmt_us.pool_name
-  pool_type                  = local.pool_configs.mgmt_us.pool_type
-  subnet_id                  = azurerm_subnet.avd_hosts_us.id
-  session_host_count         = local.pool_configs.mgmt_us.session_host_count
-  vm_size                    = local.pool_configs.mgmt_us.vm_size
-  admin_username             = var.avd_admin_username
-  admin_password             = var.avd_admin_password
-  use_custom_image           = local.pool_configs.mgmt_us.use_custom_image
-  custom_image_name          = local.pool_configs.mgmt_us.custom_image_name
-  shared_image_gallery_name  = module.shared_image_gallery.shared_image_gallery_name
-  shared_image_gallery_rg    = azurerm_resource_group.avd_eu.name
-  host_pool_name             = module.avd_hostpool_mgmt_us.host_pool_name
-  host_pool_token            = module.avd_hostpool_mgmt_us.host_pool_token
-  aad_join                   = var.use_aad_join
-  domain_join_enabled        = var.domain_join_enabled
-  domain_name                = var.domain_name
-  domain_join_username       = var.domain_join_username
-  domain_join_password       = var.domain_join_password
+  resource_group_name       = azurerm_resource_group.avd_us.name
+  location                  = azurerm_resource_group.avd_us.location
+  pool_name                 = local.pool_configs.mgmt_us.pool_name
+  pool_type                 = local.pool_configs.mgmt_us.pool_type
+  subnet_id                 = azurerm_subnet.avd_hosts_us.id
+  session_host_count        = local.pool_configs.mgmt_us.session_host_count
+  vm_size                   = local.pool_configs.mgmt_us.vm_size
+  admin_username            = var.avd_admin_username
+  admin_password            = var.avd_admin_password
+  use_custom_image          = local.pool_configs.mgmt_us.use_custom_image
+  custom_image_name         = local.pool_configs.mgmt_us.custom_image_name
+  shared_image_gallery_name = module.shared_image_gallery.shared_image_gallery_name
+  shared_image_gallery_rg   = azurerm_resource_group.avd_eu.name
+  host_pool_name            = module.avd_hostpool_mgmt_us.host_pool_name
+  host_pool_token           = module.avd_hostpool_mgmt_us.host_pool_token
+  aad_join                  = var.use_aad_join
+  domain_join_enabled       = var.domain_join_enabled
+  domain_name               = var.domain_name
+  domain_join_username      = var.domain_join_username
+  domain_join_password      = var.domain_join_password
   #auto_shutdown_enabled      = var.auto_shutdown_enabled
-  shutdown_time              = local.pool_configs.mgmt_us.shutdown_time
-  timezone                   = local.pool_configs.mgmt_us.timezone
-  tags                       = local.common_tags
+  shutdown_time = local.pool_configs.mgmt_us.shutdown_time
+  timezone      = local.pool_configs.mgmt_us.timezone
+  tags          = local.common_tags
 }

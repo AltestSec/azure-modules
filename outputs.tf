@@ -22,8 +22,8 @@ output "vm_names" {
 output "service_bus_namespace" {
   description = "Service Bus namespace details"
   value = {
-    name                = module.sbus.namespace_name
-    connection_string   = module.sbus.primary_connection_string
+    name              = module.sbus.namespace_name
+    connection_string = module.sbus.primary_connection_string
   }
   sensitive = true
 }
@@ -31,7 +31,7 @@ output "service_bus_namespace" {
 output "ssh_connection_commands" {
   description = "SSH commands to connect to VMs"
   value = [
-    for i, vm in azurerm_linux_virtual_machine.main : 
+    for i, vm in azurerm_linux_virtual_machine.main :
     "ssh adminuser@${azurerm_public_ip.main[i].ip_address}"
   ]
 }

@@ -24,7 +24,7 @@ variable "dev_pool_size_eu" {
   description = "Number of session hosts in EU development pool"
   type        = number
   default     = 4
-  
+
   validation {
     condition     = var.dev_pool_size_eu >= 1 && var.dev_pool_size_eu <= 20
     error_message = "Development pool size must be between 1 and 20."
@@ -35,7 +35,7 @@ variable "dev_pool_size_us" {
   description = "Number of session hosts in US development pool"
   type        = number
   default     = 6
-  
+
   validation {
     condition     = var.dev_pool_size_us >= 1 && var.dev_pool_size_us <= 20
     error_message = "Development pool size must be between 1 and 20."
@@ -46,7 +46,7 @@ variable "mgmt_pool_size_us" {
   description = "Number of session hosts in US management pool"
   type        = number
   default     = 3
-  
+
   validation {
     condition     = var.mgmt_pool_size_us >= 1 && var.mgmt_pool_size_us <= 10
     error_message = "Management pool size must be between 1 and 10."
@@ -115,7 +115,7 @@ variable "enable_image_building" {
 variable "image_build_schedule" {
   description = "Cron schedule for image building"
   type        = string
-  default     = "0 2 * * 0"  # Every Sunday at 2 AM
+  default     = "0 2 * * 0" # Every Sunday at 2 AM
 }
 
 # Security Configuration
@@ -161,10 +161,10 @@ variable "backup_retention_days" {
 variable "dev_vm_size" {
   description = "VM size for development session hosts"
   type        = string
-  default     = "Standard_B2als_v2"  # 2 vCPU, 4 GB RAM, AMD EPYC-based, burstable
-  
+  default     = "Standard_B2als_v2" # 2 vCPU, 4 GB RAM, AMD EPYC-based, burstable
+
   validation {
-    condition = can(regex("^Standard_", var.dev_vm_size))
+    condition     = can(regex("^Standard_", var.dev_vm_size))
     error_message = "VM size must be a valid Azure VM size starting with 'Standard_'."
   }
 }
@@ -172,10 +172,10 @@ variable "dev_vm_size" {
 variable "mgmt_vm_size" {
   description = "VM size for management session hosts"
   type        = string
-  default     = "Standard_B2als_v2"  # 2 vCPU, 4 GB RAM, AMD EPYC-based, burstable
-  
+  default     = "Standard_B2als_v2" # 2 vCPU, 4 GB RAM, AMD EPYC-based, burstable
+
   validation {
-    condition = can(regex("^Standard_", var.mgmt_vm_size))
+    condition     = can(regex("^Standard_", var.mgmt_vm_size))
     error_message = "VM size must be a valid Azure VM size starting with 'Standard_'."
   }
 }
@@ -185,7 +185,7 @@ variable "primary_location" {
   description = "Primary Azure region for EU resources"
   type        = string
   default     = "West Europe"
-  
+
   validation {
     condition = contains([
       "West Europe", "North Europe", "UK South", "UK West",
@@ -199,7 +199,7 @@ variable "secondary_location" {
   description = "Secondary Azure region for US resources"
   type        = string
   default     = "East US"
-  
+
   validation {
     condition = contains([
       "East US", "East US 2", "West US", "West US 2", "West US 3",

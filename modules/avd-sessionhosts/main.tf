@@ -138,12 +138,12 @@ resource "azurerm_virtual_machine_extension" "avd_dsc" {
     modulesUrl            = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_09-08-2022.zip"
     configurationFunction = "Configuration.ps1\\AddSessionHost"
     properties = {
-      hostPoolName          = var.host_pool_name
-      registrationInfoToken = var.host_pool_token
-      aadJoin              = var.aad_join
-      UseAgentDownloadEndpoint = true
-      aadJoinPreview       = false
-      mdmId                = ""
+      hostPoolName                           = var.host_pool_name
+      registrationInfoToken                  = var.host_pool_token
+      aadJoin                                = var.aad_join
+      UseAgentDownloadEndpoint               = true
+      aadJoinPreview                         = false
+      mdmId                                  = ""
       sessionHostConfigurationLastUpdateTime = ""
     }
   })
