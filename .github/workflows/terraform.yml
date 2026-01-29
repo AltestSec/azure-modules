@@ -526,9 +526,9 @@ jobs:
         fi
         
         # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-        STORAGE_NAME="${{ env.RESOURCE_PREFIX }}tfstates"
-        RG_NAME="${{ env.RESOURCE_PREFIX }}-tfstate-rg"
-        KV_NAME="${{ env.RESOURCE_PREFIX }}-kv"
+        STORAGE_NAME="${{ RESOURCE_PREFIX }}tfstates"
+        RG_NAME="${{ RESOURCE_PREFIX }}-tfstate-rg"
+        KV_NAME="${{ RESOURCE_PREFIX }}-kv"
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
