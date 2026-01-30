@@ -7,18 +7,16 @@ on:
       - main
       - develop
       - az_payground/**
+      - 'az_payground/**'
     paths:
-      - '*.tf'
-      - '*.tfvars'
-      - 'modules/**'
+      - 'modules/vm/**'
+      - 'modules/vm-scheduler-function/**'
       - '.github/workflows/vm-deployment.yml'
   pull_request:
     branches:
       - main
     paths:
-      - '*.tf'
-      - '*.tfvars'
-      - 'modules/**'
+      - 'modules/vm/**'
       - '.github/workflows/vm-deployment.yml'
   workflow_dispatch:
     inputs:
