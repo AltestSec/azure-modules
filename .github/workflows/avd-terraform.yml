@@ -5,10 +5,12 @@ on:
     branches:
       - main
       - develop
+#      - az_payground/**
     paths:
       - 'az_payground/avd-*.tf'
       - 'az_payground/modules/avd-*/**'
       - 'az_payground/modules/shared-image-gallery/**'
+      - '.github/workflows/avd-terraform.yml'
   pull_request:
     branches:
       - main
@@ -16,6 +18,7 @@ on:
       - 'az_payground/avd-*.tf'
       - 'az_payground/modules/avd-*/**'
       - 'az_payground/modules/shared-image-gallery/**'
+      - '.github/workflows/avd-terraform.yml'
   workflow_dispatch:
     inputs:
       dev_pool_size_eu:
@@ -69,6 +72,33 @@ on:
           - plan
           - apply
           - destroy
+      resource_prefix:
+        description: 'Resource prefix (e.g., omerzlikin-3444d253-9433)'
+        required: true
+        default: 'omerzlikin'
+        type: string
+      due_date:
+        description: 'Due date for resources (YYYY-MM-DD)'
+        required: false
+        default: '2026-02-12'
+        type: string
+      primary_location:
+        description: 'Primary Location (EU)'
+        required: true
+        default: 'westeurope'
+        type: choice
+        options:
+          - westeurope
+          - northeurope
+      secondary_location:
+        description: 'Secondary Location (US)'
+        required: true
+        default: 'eastus'
+        type: choice
+        options:
+          - eastus
+          - eastus2
+          - westus2
       enable_image_building:
         description: 'Enable Image Building Pipeline'
         required: true
@@ -81,11 +111,18 @@ on:
         type: boolean
 
 env:
-  TF_WORKING_DIR: './az_payground'
-  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  TF_WORKING_DIR: ${{ github.workspace }}
+  # Terraform Azure Provider Environment Variables
+  ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+  ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+  ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+  ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
+  ARM_USE_MSI: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   security-scan:
@@ -140,35 +177,271 @@ jobs:
         terraform_version: 1.7.0
 
     - name: Azure Login
-      uses: azure/login@v1
+      uses: azure/login@v2
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Setup Terraform Backend
       run: |
-        # Create storage account for Terraform state
-        STORAGE_NAME="tfstateavd$(date +%s | tail -c 6)"
-        az group create --name tfstate-avd-rg --location "West Europe" --output none || true
+        # Set resource prefix from input or default
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          DUE_DATE="${{ github.event.inputs.due_date }}"
+          LOCATION="${{ github.event.inputs.primary_location }}"
+        else
+          RESOURCE_PREFIX="omerzlikin"
+          DUE_DATE="2026-02-12"
+          LOCATION="westeurope"
+        fi
+        
+        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
+        STORAGE_NAME="${RESOURCE_PREFIX}avdtfstates"
+        RG_NAME="${RESOURCE_PREFIX}-avd-tfstate-rg"
+        
+        echo "Creating AVD Terraform state storage with prefix: $RESOURCE_PREFIX"
+        echo "Storage account: $STORAGE_NAME"
+        echo "Resource group: $RG_NAME"
+        echo "Due date: $DUE_DATE"
+        
+        # Create resource group for Terraform state
+        az group create --name "$RG_NAME" --location "$LOCATION" --output none || true
+        
+        # Create storage account with versioning and RBAC
         az storage account create \
-          --name $STORAGE_NAME \
-          --resource-group tfstate-avd-rg \
-          --location "West Europe" \
+          --name "$STORAGE_NAME" \
+          --resource-group "$RG_NAME" \
+          --location "$LOCATION" \
           --sku Standard_LRS \
+          --kind StorageV2 \
+          --allow-blob-public-access false \
+          --tags owner=${RESOURCE_PREFIX} createdBy=terraform dueDate="$DUE_DATE" purpose=avd-tfstate \
           --output none || true
+
+        az storage account blob-service-properties update \
+          --resource-group "$RG_NAME" \
+          --account-name "$STORAGE_NAME" \
+          --enable-versioning true
+        
+        # Create container for Terraform state
         az storage container create \
-          --name tfstate \
-          --account-name $STORAGE_NAME \
+          --name "${STORAGE_NAME}-${{ github.event.inputs.environment || 'dev' }}" \
+          --account-name "$STORAGE_NAME" \
+          --auth-mode login \
           --output none || true
+        
+        # Get current user/service principal object ID
+        # Assign Storage Blob Data Contributor role for RBAC access
+        SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
+        SA_ID="$(az storage account show -g "$RG_NAME" -n "$STORAGE_NAME" --query id -o tsv)"
+
+        # create only if missing
+        if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
+          --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
+          for i in {1..30}; do
+            echo "Attempt Assign Blob Storage Contributor set ($i/30)..."
+            az role assignment create \
+              --assignee-object-id "$SP_OBJ_ID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Storage Blob Data Contributor" \
+              --scope "$SA_ID" \
+              -o none
+            sleep 5
+          done
+        fi
+        
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
+        echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
+
+    - name: Key Vault Cleanup
+      run: |
+        # Set resource prefix and location
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          LOCATION="${{ github.event.inputs.primary_location }}"
+        else
+          RESOURCE_PREFIX="omerzlikin"
+          LOCATION="westeurope"
+        fi
+        
+        KV_NAME="${RESOURCE_PREFIX}-avd-kv"
+        
+        echo "🧹 Checking for existing/deleted Key Vault: $KV_NAME"
+        
+        # Check if Key Vault exists in soft-deleted state
+        if az keyvault show-deleted --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null; then
+          echo "⚠️ Found soft-deleted Key Vault, attempting cleanup..."
+          
+          # Try to purge the soft-deleted Key Vault
+          if az keyvault purge --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null; then
+            echo "🔥 Purging soft-deleted Key Vault..."
+            
+            # Wait for purge to complete (max 3 minutes)
+            PURGE_SUCCESS=false
+            for i in {1..18}; do  # 18 attempts * 10 seconds = 3 minutes
+              if ! az keyvault show-deleted --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null; then
+                echo "✅ Key Vault purge completed successfully"
+                PURGE_SUCCESS=true
+                break
+              fi
+              echo "Waiting for purge completion... ($i/18)"
+              sleep 10
+            done
+            
+            # If purge didn't complete in time, use alternative name
+            if [ "$PURGE_SUCCESS" = false ]; then
+              echo "⏰ Purge taking too long, using alternative Key Vault name"
+              KV_NAME="${RESOURCE_PREFIX}-avd-common-kv"
+              echo "🔄 New Key Vault name: $KV_NAME"
+              
+              # Check if alternative name is also soft-deleted
+              if az keyvault show-deleted --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null; then
+                echo "⚠️ Alternative name also soft-deleted, trying to purge..."
+                az keyvault purge --name "$KV_NAME" --location "$LOCATION" --output none 2>/dev/null || true
+                sleep 10  # Brief wait for alternative purge
+              fi
+            fi
+          else
+            echo "❌ Cannot purge soft-deleted Key Vault (may have purge protection)"
+            echo "🔄 Using alternative Key Vault name"
+            KV_NAME="${RESOURCE_PREFIX}-avd-common-kv"
+            echo "New Key Vault name: $KV_NAME"
+          fi
+        else
+          echo "✅ No soft-deleted Key Vault found, proceeding with creation"
+        fi
+        
+        # Export variables for next steps
+        echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
+        echo "LOCATION=$LOCATION" >> $GITHUB_ENV
+
+    - name: Create Key Vault and Setup RBAC
+      run: |
+        echo "🔧 Creating Key Vault: ${{ env.KV_NAME }}"
+        
+        # Create Key Vault if it doesn't exist
+        if ! az keyvault show --name "${{ env.KV_NAME }}" --resource-group "${{ env.TFSTATE_RG_NAME }}" --output none 2>/dev/null; then
+          az keyvault create \
+            --name "${{ env.KV_NAME }}" \
+            --resource-group "${{ env.TFSTATE_RG_NAME }}" \
+            --location "${{ env.LOCATION }}" \
+            --sku standard \
+            --enable-rbac-authorization true \
+            --tags owner=${{ env.RESOURCE_PREFIX }} createdBy=terraform purpose=avd-ssh-keys \
+            --output none || true
+        fi
+        
+        # Get service principal object ID for RBAC
+        SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
+        KV_ID="$(az keyvault show --name "${{ env.KV_NAME }}" --resource-group "${{ env.TFSTATE_RG_NAME }}" --query id -o tsv)"
+        
+        # Assign Key Vault Secrets Officer role to service principal
+        echo "🔐 Setting up Key Vault RBAC permissions..."
+        if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$KV_ID" \
+          --query "[?roleDefinitionName=='Key Vault Secrets Officer'] | length(@)" -o tsv | grep -qx 1; then
+          
+          echo "Assigning Key Vault Secrets Officer role to service principal..."
+          
+          # Retry loop for role assignment
+          for i in {1..10}; do
+            echo "Attempt to assign Key Vault Secrets Officer role ($i/10)..."
+            if az role assignment create \
+              --assignee-object-id "$SP_OBJ_ID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "Key Vault Secrets Officer" \
+              --scope "$KV_ID" \
+              --output none 2>/dev/null; then
+              echo "✅ Role assignment successful"
+              break
+            else
+              echo "⚠️ Role assignment attempt $i failed, retrying in 3 seconds..."
+              sleep 3
+            fi
+            
+            # If this is the last attempt, show error but continue
+            if [ $i -eq 10 ]; then
+              echo "❌ Failed to assign role after 10 attempts, but continuing..."
+            fi
+          done
+          
+          # Wait for role assignment to propagate
+          echo "Waiting for RBAC permissions to propagate..."
+          sleep 5
+        fi
+
+    - name: Setup SSH Key
+      run: |
+        # SSH key management with GitHub Secrets priority
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          
+          # Validate SSH key format first
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, using Azure Key Vault..."
+          
+          # Check for existing SSH key in Key Vault
+          echo "🔍 Checking for existing SSH key in Key Vault: ${{ env.KV_NAME }}"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "${{ env.KV_NAME }}" --name "avd-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Using existing SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate existing key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "🔧 Generating new SSH key and storing in Azure Key Vault..."
+            
+            # Generate SSH key
+            mkdir -p ~/.ssh
+            ssh-keygen -t rsa -b 4096 -f ~/.ssh/avd_terraform_key -N "" -C "avd-terraform-github-$(date +%Y%m%d-%H%M)"
+            PUBLIC_KEY=$(cat ~/.ssh/avd_terraform_key.pub)
+            
+            # Validate generated key format
+            if [[ ! "$PUBLIC_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Generated SSH public key has invalid format"
+              exit 1
+            fi
+            
+            # Store in Azure Key Vault for future runs
+            az keyvault secret set \
+              --vault-name "${{ env.KV_NAME }}" \
+              --name "avd-ssh-public-key" \
+              --value "$PUBLIC_KEY" \
+              --description "SSH public key for AVD Terraform-managed VMs (GitHub Actions)" \
+              --output none
+            
+            echo "✅ SSH key generated and stored in Key Vault: ${{ env.KV_NAME }}"
+            echo "💡 For faster access, add this key to GitHub Secrets as VM_SSH_PUBLIC_KEY:"
+            echo "$PUBLIC_KEY"
+            echo "SSH_PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
+          fi
+        fi
+        
+        echo "🔑 SSH key configured successfully"
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=tfstate-avd-rg" \
-          -backend-config="container_name=tfstate" \
-          -backend-config="key=avd-terraform.tfstate"
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ github.event.inputs.environment || 'dev' }}" \
+          -backend-config="key=avd-terraform.tfstate" \
+          -backend-config="use_azuread_auth=true"
 
     - name: Terraform Validate
       working-directory: ${{ env.TF_WORKING_DIR }}
@@ -182,7 +455,14 @@ jobs:
     name: 'Terraform Plan'
     runs-on: ubuntu-latest
     needs: terraform-validate
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (
+      github.ref == 'refs/heads/main' || 
+      github.ref == 'refs/heads/develop' ||
+      startsWith(github.ref, 'refs/heads/az_payground/')
+      ))
     
     steps:
     - name: Checkout
@@ -193,8 +473,13 @@ jobs:
       with:
         terraform_version: 1.7.0
 
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
     - name: Azure Login
-      uses: azure/login@v1
+      uses: azure/login@v2
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
@@ -205,52 +490,205 @@ jobs:
           echo "DEV_POOL_SIZE_US=${{ github.event.inputs.dev_pool_size_us }}" >> $GITHUB_ENV
           echo "MGMT_POOL_SIZE_US=${{ github.event.inputs.mgmt_pool_size_us }}" >> $GITHUB_ENV
           echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
+          echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+          echo "PRIMARY_LOCATION=${{ github.event.inputs.primary_location }}" >> $GITHUB_ENV
+          echo "SECONDARY_LOCATION=${{ github.event.inputs.secondary_location }}" >> $GITHUB_ENV
           echo "ENABLE_IMAGE_BUILDING=${{ github.event.inputs.enable_image_building }}" >> $GITHUB_ENV
           echo "ENABLE_SECURITY_SCANNING=${{ github.event.inputs.enable_security_scanning }}" >> $GITHUB_ENV
+          
+          # Set local variables for storage naming
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
         else
           echo "DEV_POOL_SIZE_EU=4" >> $GITHUB_ENV
           echo "DEV_POOL_SIZE_US=6" >> $GITHUB_ENV
           echo "MGMT_POOL_SIZE_US=3" >> $GITHUB_ENV
           echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+          echo "RESOURCE_PREFIX=omerzlikin" >> $GITHUB_ENV
+          echo "DUE_DATE=2026-02-12" >> $GITHUB_ENV
+          echo "PRIMARY_LOCATION=westeurope" >> $GITHUB_ENV
+          echo "SECONDARY_LOCATION=eastus" >> $GITHUB_ENV
           echo "ENABLE_IMAGE_BUILDING=true" >> $GITHUB_ENV
           echo "ENABLE_SECURITY_SCANNING=true" >> $GITHUB_ENV
+          
+          # Set local variables for storage naming
+          RESOURCE_PREFIX="omerzlikin"
+          ENVIRONMENT="dev"
         fi
+        
+        # Use local variables (not env variables) for immediate use
+        STORAGE_NAME="${RESOURCE_PREFIX}avdtfstates"
+        RG_NAME="${RESOURCE_PREFIX}-avd-tfstate-rg"
+        KV_NAME="${RESOURCE_PREFIX}-avd-kv"
+        
+        # Set storage-related environment variables
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+        
+        # Debug output
+        echo "Event: ${{ github.event_name }}"
+        echo "Resource Prefix: $RESOURCE_PREFIX"
+        echo "Storage Account: $STORAGE_NAME"
+        echo "Resource Group: $RG_NAME"
+        echo "Key Vault: $KV_NAME"
 
-    - name: Generate Admin Password
+    - name: Retrieve SSH Key
       run: |
-        ADMIN_PASSWORD=$(openssl rand -base64 32)
-        echo "::add-mask::$ADMIN_PASSWORD"
-        echo "AVD_ADMIN_PASSWORD=$ADMIN_PASSWORD" >> $GITHUB_ENV
+        # SSH key retrieval with GitHub Secrets priority
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          
+          # Validate SSH key format
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, retrieving from Azure Key Vault..."
+          
+          # Retrieve SSH key from Key Vault
+          echo "🔍 Retrieving SSH key from Key Vault: ${{ env.KV_NAME }}"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "${{ env.KV_NAME }}" --name "avd-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Retrieved SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "❌ SSH key not found in Key Vault. Please run terraform-validate job first to generate SSH key."
+            exit 1
+          fi
+        fi
+        
+        echo "🔑 SSH key retrieved successfully"
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=tfstate-avd-rg" \
-          -backend-config="container_name=tfstate" \
-          -backend-config="key=avd-terraform.tfstate"
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ env.ENVIRONMENT }}" \
+          -backend-config="key=avd-terraform.tfstate" \
+          -backend-config="use_azuread_auth=true"
 
     - name: Terraform Plan
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
+        echo "🔍 Running AVD Terraform Plan..."
+        echo "=================================="
+        
         terraform plan \
-          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-          -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+          -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
           -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="primary_location=${{ env.PRIMARY_LOCATION }}" \
+          -var="secondary_location=${{ env.SECONDARY_LOCATION }}" \
           -var="dev_pool_size_eu=${{ env.DEV_POOL_SIZE_EU }}" \
           -var="dev_pool_size_us=${{ env.DEV_POOL_SIZE_US }}" \
           -var="mgmt_pool_size_us=${{ env.MGMT_POOL_SIZE_US }}" \
-          -var="avd_admin_password=${{ env.AVD_ADMIN_PASSWORD }}" \
+          -var="avd_admin_password=${{ secrets.AVD_ADMIN_PASSWORD }}" \
           -var="enable_image_building=${{ env.ENABLE_IMAGE_BUILDING }}" \
           -var="enable_security_scanning=${{ env.ENABLE_SECURITY_SCANNING }}" \
+          -detailed-exitcode \
           -out=tfplan
+        
+        PLAN_EXIT_CODE=$?
+        echo "=================================="
+        echo "AVD Terraform plan completed with exit code: $PLAN_EXIT_CODE"
+        
+        # Show plan summary
+        echo "📋 Plan Summary:"
+        terraform show -no-color tfplan
+        
+        # Exit with the original terraform plan exit code
+        exit $PLAN_EXIT_CODE
 
-    - name: Upload Plan
+    - name: Generate Cost Estimate
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        # Generate cost breakdown for the planned AVD infrastructure
+        infracost breakdown --path . \
+          --terraform-var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          --terraform-var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+          --terraform-var="environment=${{ env.ENVIRONMENT }}" \
+          --terraform-var="primary_location=${{ env.PRIMARY_LOCATION }}" \
+          --terraform-var="secondary_location=${{ env.SECONDARY_LOCATION }}" \
+          --terraform-var="dev_pool_size_eu=${{ env.DEV_POOL_SIZE_EU }}" \
+          --terraform-var="dev_pool_size_us=${{ env.DEV_POOL_SIZE_US }}" \
+          --terraform-var="mgmt_pool_size_us=${{ env.MGMT_POOL_SIZE_US }}" \
+          --format json \
+          --out-file infracost-base.json
+
+    - name: Generate Cost Summary
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        # Generate human-readable cost summary
+        infracost output --path infracost-base.json --format table > cost-estimate.txt
+        infracost output --path infracost-base.json --format html > cost-estimate.html
+        
+        echo "## 💰 AVD Infrastructure Cost Estimate" >> cost-summary.md
+        echo "" >> cost-summary.md
+        echo "**Configuration:**" >> cost-summary.md
+        echo "- Resource Prefix: ${{ env.RESOURCE_PREFIX }}" >> cost-summary.md
+        echo "- Environment: ${{ env.ENVIRONMENT }}" >> cost-summary.md
+        echo "- EU Development Pool: ${{ env.DEV_POOL_SIZE_EU }} hosts" >> cost-summary.md
+        echo "- US Development Pool: ${{ env.DEV_POOL_SIZE_US }} hosts" >> cost-summary.md
+        echo "- US Management Pool: ${{ env.MGMT_POOL_SIZE_US }} hosts" >> cost-summary.md
+        echo "- Primary Location: ${{ env.PRIMARY_LOCATION }}" >> cost-summary.md
+        echo "- Secondary Location: ${{ env.SECONDARY_LOCATION }}" >> cost-summary.md
+        echo "- Due Date: ${{ env.DUE_DATE }}" >> cost-summary.md
+        echo "" >> cost-summary.md
+        echo "**Monthly Cost Breakdown:**" >> cost-summary.md
+        echo '```' >> cost-summary.md
+        cat cost-estimate.txt >> cost-summary.md
+        echo '```' >> cost-summary.md
+        
+        # Display cost estimate in workflow logs
+        echo "=== AVD INFRASTRUCTURE COST ESTIMATE ==="
+        cat cost-estimate.txt
+        echo "========================================"
+
+    - name: Comment Cost Estimate on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const path = '${{ env.TF_WORKING_DIR }}/cost-summary.md';
+          
+          if (fs.existsSync(path)) {
+            const costSummary = fs.readFileSync(path, 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: costSummary
+            });
+          }
+
+    - name: Upload Plan and Cost Estimates
       uses: actions/upload-artifact@v4
       with:
-        name: terraform-plan
-        path: ${{ env.TF_WORKING_DIR }}/tfplan
+        name: avd-terraform-plan-with-costs
+        path: |
+          ${{ env.TF_WORKING_DIR }}/tfplan
+          ${{ env.TF_WORKING_DIR }}/cost-estimate.txt
+          ${{ env.TF_WORKING_DIR }}/cost-estimate.html
+          ${{ env.TF_WORKING_DIR }}/infracost-base.json
+          ${{ env.TF_WORKING_DIR }}/cost-summary.md
 
   terraform-apply:
     name: 'Terraform Apply'
@@ -268,47 +706,160 @@ jobs:
       with:
         terraform_version: 1.7.0
 
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
     - name: Azure Login
-      uses: azure/login@v1
+      uses: azure/login@v2
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Download Plan
+    - name: Set Variables
+      run: |
+        echo "DEV_POOL_SIZE_EU=${{ github.event.inputs.dev_pool_size_eu }}" >> $GITHUB_ENV
+        echo "DEV_POOL_SIZE_US=${{ github.event.inputs.dev_pool_size_us }}" >> $GITHUB_ENV
+        echo "MGMT_POOL_SIZE_US=${{ github.event.inputs.mgmt_pool_size_us }}" >> $GITHUB_ENV
+        echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
+        echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+        echo "PRIMARY_LOCATION=${{ github.event.inputs.primary_location }}" >> $GITHUB_ENV
+        echo "SECONDARY_LOCATION=${{ github.event.inputs.secondary_location }}" >> $GITHUB_ENV
+        echo "ENABLE_IMAGE_BUILDING=${{ github.event.inputs.enable_image_building }}" >> $GITHUB_ENV
+        echo "ENABLE_SECURITY_SCANNING=${{ github.event.inputs.enable_security_scanning }}" >> $GITHUB_ENV
+        
+        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
+        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}avdtfstates"
+        RG_NAME="${{ github.event.inputs.resource_prefix }}-avd-tfstate-rg"
+        KV_NAME="${{ github.event.inputs.resource_prefix }}-avd-kv"
+        
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+
+    - name: Retrieve SSH Key
+      run: |
+        # SSH key retrieval with GitHub Secrets priority
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          
+          # Validate SSH key format
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, retrieving from Azure Key Vault..."
+          
+          # Retrieve SSH key from Key Vault
+          echo "🔍 Retrieving SSH key from Key Vault: ${{ env.KV_NAME }}"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "${{ env.KV_NAME }}" --name "avd-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Retrieved SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "❌ SSH key not found in Key Vault. Please run terraform-validate job first to generate SSH key."
+            exit 1
+          fi
+        fi
+        
+        echo "🔑 SSH key retrieved successfully"
+
+    - name: Download Plan and Cost Estimates
       uses: actions/download-artifact@v4
       with:
-        name: terraform-plan
+        name: avd-terraform-plan-with-costs
         path: ${{ env.TF_WORKING_DIR }}
+
+    - name: Display Pre-Apply Cost Estimate
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        echo "=== PRE-APPLY AVD COST ESTIMATE ==="
+        if [ -f "cost-estimate.txt" ]; then
+          cat cost-estimate.txt
+        else
+          echo "Cost estimate file not found"
+        fi
+        echo "==================================="
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=tfstate-avd-rg" \
-          -backend-config="container_name=tfstate" \
-          -backend-config="key=avd-terraform.tfstate"
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ env.ENVIRONMENT }}" \
+          -backend-config="key=avd-terraform.tfstate" \
+          -backend-config="use_azuread_auth=true"
 
     - name: Terraform Apply
       working-directory: ${{ env.TF_WORKING_DIR }}
-      run: terraform apply -auto-approve tfplan
+      run: |
+        echo "🚀 Applying AVD infrastructure changes..."
+        echo "Resource prefix: ${{ env.RESOURCE_PREFIX }}"
+        echo "Due date: ${{ env.DUE_DATE }}"
+        terraform apply -auto-approve tfplan
+        echo "✅ AVD Infrastructure deployment completed"
 
-    - name: Output Infrastructure Details
+    - name: Generate Post-Apply Cost Analysis
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
-        echo "## AVD Infrastructure Deployed Successfully! 🚀" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
-        terraform output -json avd_deployment_summary | jq -r '
-          "**Total Session Hosts:** \(.total_session_hosts)",
-          "",
-          "### Pool Configuration",
-          "| Pool | Location | VM Size | Host Count | Image Type |",
-          "|------|----------|---------|------------|------------|",
-          (.pools | to_entries[] | "| \(.key) | \(.value.location) | \(.value.vm_size) | \(.value.host_count) | \(.value.image_type) |"),
-          "",
-          "### Features Enabled",
-          (.features | to_entries[] | "- **\(.key | gsub("_"; " ") | ascii_upcase):** \(.value)")
-        ' >> $GITHUB_STEP_SUMMARY
+        # Generate current state cost analysis
+        infracost breakdown --path . \
+          --format json \
+          --out-file infracost-current.json
+        
+        # Generate readable cost report
+        infracost output --path infracost-current.json --format table > current-costs.txt
+        
+        echo "=== DEPLOYED AVD INFRASTRUCTURE COSTS ==="
+        cat current-costs.txt
+        echo "=========================================="
+        
+        # Create deployment summary
+        echo "## 🎉 AVD Infrastructure Deployment Complete" > deployment-summary.md
+        echo "" >> deployment-summary.md
+        echo "**Deployed Configuration:**" >> deployment-summary.md
+        echo "- Resource Prefix: ${{ env.RESOURCE_PREFIX }}" >> deployment-summary.md
+        echo "- Environment: ${{ env.ENVIRONMENT }}" >> deployment-summary.md
+        echo "- EU Development Pool: ${{ env.DEV_POOL_SIZE_EU }} hosts" >> deployment-summary.md
+        echo "- US Development Pool: ${{ env.DEV_POOL_SIZE_US }} hosts" >> deployment-summary.md
+        echo "- US Management Pool: ${{ env.MGMT_POOL_SIZE_US }} hosts" >> deployment-summary.md
+        echo "- Primary Location: ${{ env.PRIMARY_LOCATION }}" >> deployment-summary.md
+        echo "- Secondary Location: ${{ env.SECONDARY_LOCATION }}" >> deployment-summary.md
+        echo "- Due Date: ${{ env.DUE_DATE }}" >> deployment-summary.md
+        echo "" >> deployment-summary.md
+        echo "**Monthly Operating Costs:**" >> deployment-summary.md
+        echo '```' >> deployment-summary.md
+        cat current-costs.txt >> deployment-summary.md
+        echo '```' >> deployment-summary.md
+        echo "" >> deployment-summary.md
+        echo "**Next Steps:**" >> deployment-summary.md
+        echo "- AVD session hosts are configured with auto-scaling" >> deployment-summary.md
+        echo "- Monitor costs in Azure Cost Management" >> deployment-summary.md
+        echo "- Access virtual desktops through Azure Virtual Desktop client" >> deployment-summary.md
+        echo "- Review and optimize resource usage regularly" >> deployment-summary.md
+
+    - name: Upload Deployment Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: avd-deployment-results
+        path: |
+          ${{ env.TF_WORKING_DIR }}/current-costs.txt
+          ${{ env.TF_WORKING_DIR }}/infracost-current.json
+          ${{ env.TF_WORKING_DIR }}/deployment-summary.md
 
   image-building:
     name: 'Build Custom Images'
@@ -321,7 +872,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Azure Login
-      uses: azure/login@v1
+      uses: azure/login@v2
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
@@ -348,18 +899,18 @@ jobs:
     steps:
     - name: Setup Monitoring
       run: |
-        echo "Setting up monitoring and alerting..."
+        echo "Setting up AVD monitoring and alerting..."
         echo "Configuring Log Analytics workspaces"
-        echo "Setting up Azure Monitor alerts"
+        echo "Setting up Azure Monitor alerts for AVD"
 
     - name: Configure Auto-Scaling
       run: |
-        echo "Configuring auto-scaling policies..."
+        echo "Configuring AVD auto-scaling policies..."
         echo "Setting up scaling plans for each pool"
 
     - name: Security Hardening
       run: |
-        echo "Applying security hardening..."
+        echo "Applying AVD security hardening..."
         echo "Configuring network security groups"
         echo "Setting up Azure Security Center policies"
 
@@ -367,3 +918,159 @@ jobs:
       run: |
         echo "🎉 AVD Infrastructure deployment completed successfully!"
         echo "Access your virtual desktops through the Azure Virtual Desktop client"
+
+  terraform-destroy:
+    name: 'Terraform Destroy'
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy' && github.event_name == 'workflow_dispatch'
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.0
+
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set Variables
+      run: |
+        echo "DEV_POOL_SIZE_EU=${{ github.event.inputs.dev_pool_size_eu }}" >> $GITHUB_ENV
+        echo "DEV_POOL_SIZE_US=${{ github.event.inputs.dev_pool_size_us }}" >> $GITHUB_ENV
+        echo "MGMT_POOL_SIZE_US=${{ github.event.inputs.mgmt_pool_size_us }}" >> $GITHUB_ENV
+        echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
+        echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
+        echo "PRIMARY_LOCATION=${{ github.event.inputs.primary_location }}" >> $GITHUB_ENV
+        echo "SECONDARY_LOCATION=${{ github.event.inputs.secondary_location }}" >> $GITHUB_ENV
+        
+        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
+        STORAGE_NAME="${{ github.event.inputs.resource_prefix }}avdtfstates"
+        RG_NAME="${{ github.event.inputs.resource_prefix }}-avd-tfstate-rg"
+        KV_NAME="${{ github.event.inputs.resource_prefix }}-avd-kv"
+        
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
+
+    - name: Retrieve SSH Key
+      run: |
+        # SSH key retrieval with GitHub Secrets priority
+        if [ -n "${{ secrets.VM_SSH_PUBLIC_KEY }}" ]; then
+          echo "✅ Using SSH key from GitHub Secrets"
+          
+          # Validate SSH key format
+          if [[ ! "${{ secrets.VM_SSH_PUBLIC_KEY }}" =~ ^ssh-(rsa|ed25519) ]]; then
+            echo "❌ Invalid SSH public key format in GitHub Secrets"
+            exit 1
+          fi
+          
+          echo "SSH_PUBLIC_KEY=${{ secrets.VM_SSH_PUBLIC_KEY }}" >> $GITHUB_ENV
+          echo "🔑 SSH key from GitHub Secrets configured successfully"
+        else
+          echo "🔍 GitHub Secret VM_SSH_PUBLIC_KEY not found, retrieving from Azure Key Vault..."
+          
+          # Retrieve SSH key from Key Vault
+          echo "🔍 Retrieving SSH key from Key Vault: ${{ env.KV_NAME }}"
+          EXISTING_KEY=$(az keyvault secret show --vault-name "${{ env.KV_NAME }}" --name "avd-ssh-public-key" --query value -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_KEY" ]; then
+            echo "✅ Retrieved SSH key from Azure Key Vault: ${{ env.KV_NAME }}"
+            
+            # Validate key format
+            if [[ ! "$EXISTING_KEY" =~ ^ssh-(rsa|ed25519) ]]; then
+              echo "❌ Invalid SSH public key format in Key Vault"
+              exit 1
+            fi
+            
+            echo "SSH_PUBLIC_KEY=$EXISTING_KEY" >> $GITHUB_ENV
+          else
+            echo "❌ SSH key not found in Key Vault. Please run terraform-validate job first to generate SSH key."
+            exit 1
+          fi
+        fi
+        
+        echo "🔑 SSH key retrieved successfully"
+
+    - name: Terraform Init
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ env.ENVIRONMENT }}" \
+          -backend-config="key=avd-terraform.tfstate" \
+          -backend-config="use_azuread_auth=true"
+
+    - name: Generate Pre-Destroy Cost Analysis
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        # Show current costs before destruction
+        infracost breakdown --path . \
+          --format table > pre-destroy-costs.txt
+        
+        echo "=== AVD RESOURCES TO BE DESTROYED ==="
+        cat pre-destroy-costs.txt
+        echo "====================================="
+        
+        # Calculate monthly savings
+        MONTHLY_COST=$(infracost breakdown --path . --format json | jq -r '.totalMonthlyCost // "0"')
+        echo "💰 Monthly cost savings after destroy: \${MONTHLY_COST}"
+
+    - name: Terraform Destroy
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        echo "🗑️ Destroying AVD infrastructure..."
+        echo "Resource prefix: ${{ env.RESOURCE_PREFIX }}"
+        terraform destroy -auto-approve \
+          -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+          -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="primary_location=${{ env.PRIMARY_LOCATION }}" \
+          -var="secondary_location=${{ env.SECONDARY_LOCATION }}" \
+          -var="dev_pool_size_eu=${{ env.DEV_POOL_SIZE_EU }}" \
+          -var="dev_pool_size_us=${{ env.DEV_POOL_SIZE_US }}" \
+          -var="mgmt_pool_size_us=${{ env.MGMT_POOL_SIZE_US }}" \
+          -var="avd_admin_password=${{ secrets.AVD_ADMIN_PASSWORD }}"
+        echo "✅ AVD Infrastructure destruction completed"
+
+    - name: Generate Destruction Summary
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        echo "## 🗑️ AVD Infrastructure Destruction Complete" > destruction-summary.md
+        echo "" >> destruction-summary.md
+        echo "**Destroyed Configuration:**" >> destruction-summary.md
+        echo "- Resource Prefix: ${{ env.RESOURCE_PREFIX }}" >> destruction-summary.md
+        echo "- Environment: ${{ env.ENVIRONMENT }}" >> destruction-summary.md
+        echo "- EU Development Pool: ${{ env.DEV_POOL_SIZE_EU }} hosts" >> destruction-summary.md
+        echo "- US Development Pool: ${{ env.DEV_POOL_SIZE_US }} hosts" >> destruction-summary.md
+        echo "- US Management Pool: ${{ env.MGMT_POOL_SIZE_US }} hosts" >> destruction-summary.md
+        echo "- Primary Location: ${{ env.PRIMARY_LOCATION }}" >> destruction-summary.md
+        echo "- Secondary Location: ${{ env.SECONDARY_LOCATION }}" >> destruction-summary.md
+        echo "- Due Date: ${{ env.DUE_DATE }}" >> destruction-summary.md
+        echo "" >> destruction-summary.md
+        echo "**Cost Savings:**" >> destruction-summary.md
+        echo '```' >> destruction-summary.md
+        cat pre-destroy-costs.txt >> destruction-summary.md
+        echo '```' >> destruction-summary.md
+        echo "" >> destruction-summary.md
+        echo "All AVD resources have been successfully removed from Azure." >> destruction-summary.md
+
+    - name: Upload Destruction Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: avd-destruction-results
+        path: |
+          ${{ env.TF_WORKING_DIR }}/pre-destroy-costs.txt
+          ${{ env.TF_WORKING_DIR }}/destruction-summary.md
