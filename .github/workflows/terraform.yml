@@ -537,8 +537,10 @@ jobs:
     - name: Terraform Plan
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
+        echo "🔍 Running Terraform Plan..."
+        echo "=================================="
+    
         terraform plan \
-          -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
           -var="location=${{ env.LOCATION }}" \
           -var="pool_type=${{ env.POOL_TYPE }}" \
           -var="vm_count=${{ env.VM_COUNT }}" \
@@ -548,7 +550,20 @@ jobs:
           -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
           -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
           -var="avd_admin_password=${{ secrets.AVD_ADMIN_PASSWORD }}" \
+          -detailed-exitcode \
           -out=tfplan
+
+        
+        PLAN_EXIT_CODE=$?
+        echo "=================================="
+        echo "Terraform plan completed with exit code: $PLAN_EXIT_CODE"
+        
+        # Show plan summary
+        echo "📋 Plan Summary:"
+        terraform show -no-color tfplan
+        
+        # Exit with the original terraform plan exit code
+    exit $PLAN_EXIT_CODE
 
     - name: Generate Cost Estimate
       working-directory: ${{ env.TF_WORKING_DIR }}
