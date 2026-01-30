@@ -339,7 +339,8 @@ module "avd_sessionhosts_dev_eu" {
   vm_size                   = local.pool_configs.dev_eu.vm_size
   admin_username            = var.avd_admin_username
   admin_password            = var.avd_admin_password
-  use_custom_image          = local.pool_configs.dev_eu.use_custom_image
+  #use_custom_image          = local.pool_configs.dev_eu.use_custom_image
+  use_custom_image          = false
   custom_image_name         = local.pool_configs.dev_eu.custom_image_name
   shared_image_gallery_name = module.shared_image_gallery.shared_image_gallery_name
   shared_image_gallery_rg   = azurerm_resource_group.avd_eu.name

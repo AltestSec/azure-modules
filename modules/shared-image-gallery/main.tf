@@ -13,7 +13,8 @@ resource "azurerm_container_registry" "main" {
   name                = "acr${var.environment}${var.location_short}${random_string.suffix.result}"
   resource_group_name = var.resource_group_name
   location            = var.location
-  sku                 = var.acr_sku
+  #sku                 = var.acr_sku
+  sku                 = Standard
   admin_enabled       = true
 
   public_network_access_enabled = false

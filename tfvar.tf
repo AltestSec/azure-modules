@@ -65,7 +65,7 @@ variable "admin_ssh_public_key" {
 variable "work_hours_end" {
   description = "Work hours end"
   type        = string
-  default     = "Central European Standard Time"
+  default     = "1900"
 }
 
 variable "auto_shutdown_enabled" {
