@@ -12,7 +12,7 @@ variable "tenant_id" {
 variable "resource_group_name" {
   description = "Name of the resource group"
   type        = string
-  default     = "rg-playground"
+  default     = "omerzlikin-tfstate-rg"
 }
 
 variable "location" {
@@ -72,4 +72,10 @@ variable "auto_shutdown_enabled" {
   description = "Enable auto-shutdown for VMs"
   type        = bool
   default     = true
+}
+
+variable "create_resource_group" {
+  description = "Whether to create a new resource group or use existing"
+  type        = bool
+  default     = false
 }

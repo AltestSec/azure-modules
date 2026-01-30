@@ -1,5 +1,36 @@
-# Resource Group
+# Main Terraform Configuration
+# This file includes all components for full deployment
+
+# Infrastructure Components
+# Uncomment the line below to include infrastructure resources
+# terraform {
+#   source = "./infrastructure.tf"
+# }
+
+# VM Resources
+# Uncomment the line below to include VM resources
+# terraform {
+#   source = "./vm-resources.tf"
+# }
+
+# Service Bus Resources  
+# Uncomment the line below to include Service Bus resources
+# terraform {
+#   source = "./service-bus.tf"
+# }
+
+# AVD Resources
+# Uncomment the line below to include AVD resources
+# terraform {
+#   source = "./avd-main.tf"
+# }
+
+# For now, include all components for backward compatibility
+# You can comment out sections you don't want to deploy
+
+# Basic Infrastructure (conditional)
 resource "azurerm_resource_group" "main" {
+  count    = var.create_resource_group ? 1 : 0
   name     = var.resource_group_name
   location = var.location
 
@@ -9,12 +40,21 @@ resource "azurerm_resource_group" "main" {
   }
 }
 
-# Virtual Network
+data "azurerm_resource_group" "existing" {
+  count = var.create_resource_group ? 0 : 1
+  name  = var.resource_group_name
+}
+
+locals {
+  resource_group = var.create_resource_group ? azurerm_resource_group.main[0] : data.azurerm_resource_group.existing[0]
+}
+
+# Virtual Network (only if not using separate infrastructure deployment)
 resource "azurerm_virtual_network" "main" {
   name                = "vnet-${var.environment}"
   address_space       = ["10.0.0.0/16"]
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
+  location            = local.resource_group.location
+  resource_group_name = local.resource_group.name
 
   tags = {
     Environment = var.environment
@@ -24,7 +64,7 @@ resource "azurerm_virtual_network" "main" {
 # Subnet
 resource "azurerm_subnet" "internal" {
   name                 = "subnet-${var.pool_type}"
-  resource_group_name  = azurerm_resource_group.main.name
+  resource_group_name  = local.resource_group.name
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.0.2.0/24"]
 }
@@ -32,8 +72,8 @@ resource "azurerm_subnet" "internal" {
 # Network Security Group
 resource "azurerm_network_security_group" "main" {
   name                = "nsg-${var.pool_type}"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
+  location            = local.resource_group.location
+  resource_group_name = local.resource_group.name
 
   security_rule {
     name                       = "SSH"
@@ -68,8 +108,8 @@ resource "azurerm_network_security_group" "main" {
 resource "azurerm_public_ip" "main" {
   count               = var.vm_count
   name                = "pip-${var.pool_type}-${count.index + 1}"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
+  resource_group_name = local.resource_group.name
+  location            = local.resource_group.location
   allocation_method   = "Static"
   sku                 = "Standard"
 
@@ -83,8 +123,8 @@ resource "azurerm_public_ip" "main" {
 resource "azurerm_network_interface" "main" {
   count               = var.vm_count
   name                = "nic-${var.pool_type}-${count.index + 1}"
-  location            = azurerm_resource_group.main.location
-  resource_group_name = azurerm_resource_group.main.name
+  location            = local.resource_group.location
+  resource_group_name = local.resource_group.name
 
   ip_configuration {
     name                          = "internal"
@@ -110,8 +150,8 @@ resource "azurerm_network_interface_security_group_association" "main" {
 resource "azurerm_linux_virtual_machine" "main" {
   count               = var.vm_count
   name                = "vm-${var.pool_type}-${count.index + 1}"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
+  resource_group_name = local.resource_group.name
+  location            = local.resource_group.location
   size                = var.vm_size
   admin_username      = "adminuser"
 
@@ -149,7 +189,7 @@ resource "azurerm_linux_virtual_machine" "main" {
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "main" {
   count              = var.auto_shutdown_enabled ? var.vm_count : 0
   virtual_machine_id = azurerm_linux_virtual_machine.main[count.index].id
-  location           = azurerm_resource_group.main.location
+  location           = local.resource_group.location
   enabled            = true
 
   daily_recurrence_time = var.work_hours_end
@@ -164,11 +204,11 @@ resource "azurerm_dev_test_global_vm_shutdown_schedule" "main" {
   }
 }
 
-# Service Bus Module
+# Service Bus Module (optional - comment out if not needed)
 module "sbus" {
   source = "./modules/sbus"
 
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
+  resource_group_name = local.resource_group.name
+  location            = local.resource_group.location
   environment         = var.environment
 }

@@ -11,7 +11,7 @@ on:
       - '*.tf'
       - '*.tfvars'
       - 'modules/**'
-      - '.github/workflows/terraform.yml'
+      - '.github/workflows/vm-deployment.yml'
   pull_request:
     branches:
       - main
@@ -19,7 +19,7 @@ on:
       - '*.tf'
       - '*.tfvars'
       - 'modules/**'
-      - '.github/workflows/terraform.yml'
+      - '.github/workflows/vm-deployment.yml'
   workflow_dispatch:
     inputs:
       pool_type:
@@ -537,10 +537,16 @@ jobs:
     - name: Terraform Plan
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
-        echo "🔍 Running Terraform Plan..."
+        echo "🔍 Running VM-Only Terraform Plan..."
         echo "=================================="
     
         terraform plan \
+          -target=azurerm_network_security_group.vm_nsg \
+          -target=azurerm_public_ip.vm_pip \
+          -target=azurerm_network_interface.vm_nic \
+          -target=azurerm_network_interface_security_group_association.vm_nsg_association \
+          -target=azurerm_linux_virtual_machine.vm \
+          -target=azurerm_dev_test_global_vm_shutdown_schedule.vm_shutdown \
           -var="location=${{ env.LOCATION }}" \
           -var="pool_type=${{ env.POOL_TYPE }}" \
           -var="vm_count=${{ env.VM_COUNT }}" \
@@ -549,14 +555,14 @@ jobs:
           -var="admin_ssh_public_key=${{ env.SSH_PUBLIC_KEY }}" \
           -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
           -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
-          -var="avd_admin_password=${{ secrets.AVD_ADMIN_PASSWORD }}" \
+          -var="create_resource_group=false" \
           -detailed-exitcode \
           -out=tfplan
 
         
         PLAN_EXIT_CODE=$?
         echo "=================================="
-        echo "Terraform plan completed with exit code: $PLAN_EXIT_CODE"
+        echo "VM Terraform plan completed with exit code: $PLAN_EXIT_CODE"
         
         # Show plan summary
         echo "📋 Plan Summary:"
@@ -750,11 +756,18 @@ jobs:
     - name: Terraform Apply
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
-        echo "🚀 Applying infrastructure changes..."
+        echo "🚀 Applying VM infrastructure changes..."
         echo "Resource prefix: ${{ env.RESOURCE_PREFIX }}"
         echo "Due date: ${{ env.DUE_DATE }}"
-        terraform apply -auto-approve tfplan
-        echo "✅ Infrastructure deployment completed"
+        terraform apply -auto-approve \
+          -target=azurerm_network_security_group.vm_nsg \
+          -target=azurerm_public_ip.vm_pip \
+          -target=azurerm_network_interface.vm_nic \
+          -target=azurerm_network_interface_security_group_association.vm_nsg_association \
+          -target=azurerm_linux_virtual_machine.vm \
+          -target=azurerm_dev_test_global_vm_shutdown_schedule.vm_shutdown \
+          tfplan
+        echo "✅ VM Infrastructure deployment completed"
 
     - name: Generate Post-Apply Cost Analysis
       working-directory: ${{ env.TF_WORKING_DIR }}

@@ -1,0 +1,110 @@
+name: 'Infrastructure Deployment'
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      action:
+        description: 'Terraform Action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      resource_prefix:
+        description: 'Resource prefix'
+        required: true
+        default: 'omerzlikin'
+        type: string
+      location:
+        description: 'Azure Location'
+        required: true
+        default: 'westeurope'
+        type: choice
+        options:
+          - eastus
+          - westeurope
+      create_resource_group:
+        description: 'Create new resource group'
+        required: true
+        default: false
+        type: boolean
+
+env:
+  TF_WORKING_DIR: ${{ github.workspace }}
+  ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+  ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+  ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+  ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
+  ARM_USE_MSI: false
+
+jobs:
+  terraform-infrastructure:
+    name: 'Deploy Infrastructure'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.0
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Terraform Init
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=${{ github.event.inputs.resource_prefix }}infratfstates" \
+          -backend-config="resource_group_name=${{ github.event.inputs.resource_prefix }}-infra-tfstate-rg" \
+          -backend-config="container_name=infrastructure-tfstate" \
+          -backend-config="key=infrastructure.tfstate" \
+          -backend-config="use_azuread_auth=true"
+
+    - name: Terraform Plan/Apply/Destroy
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        if [ "${{ github.event.inputs.action }}" == "plan" ]; then
+          terraform plan \
+            -target=azurerm_resource_group.main \
+            -target=azurerm_virtual_network.main \
+            -target=azurerm_subnet.vm_subnet \
+            -target=azurerm_subnet.services_subnet \
+            -var="environment=${{ github.event.inputs.environment }}" \
+            -var="location=${{ github.event.inputs.location }}" \
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}"
+        elif [ "${{ github.event.inputs.action }}" == "apply" ]; then
+          terraform apply -auto-approve \
+            -target=azurerm_resource_group.main \
+            -target=azurerm_virtual_network.main \
+            -target=azurerm_subnet.vm_subnet \
+            -target=azurerm_subnet.services_subnet \
+            -var="environment=${{ github.event.inputs.environment }}" \
+            -var="location=${{ github.event.inputs.location }}" \
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}"
+        elif [ "${{ github.event.inputs.action }}" == "destroy" ]; then
+          terraform destroy -auto-approve \
+            -target=azurerm_subnet.services_subnet \
+            -target=azurerm_subnet.vm_subnet \
+            -target=azurerm_virtual_network.main \
+            -target=azurerm_resource_group.main \
+            -var="environment=${{ github.event.inputs.environment }}" \
+            -var="location=${{ github.event.inputs.location }}" \
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}"
+        fi
