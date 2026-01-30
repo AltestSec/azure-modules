@@ -547,6 +547,7 @@ jobs:
           -var="admin_ssh_public_key=${{ env.SSH_PUBLIC_KEY }}" \
           -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
           -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+          -var="avd_admin_password=${{ secrets.AVD_ADMIN_PASSWORD }}" \
           -out=tfplan
 
     - name: Generate Cost Estimate
