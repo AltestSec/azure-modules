@@ -563,7 +563,7 @@ jobs:
         terraform show -no-color tfplan
         
         # Exit with the original terraform plan exit code
-    exit $PLAN_EXIT_CODE
+        exit $PLAN_EXIT_CODE
 
     - name: Generate Cost Estimate
       working-directory: ${{ env.TF_WORKING_DIR }}
