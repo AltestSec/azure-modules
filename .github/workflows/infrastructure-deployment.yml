@@ -34,17 +34,21 @@ on:
       location:
         description: 'Azure Location'
         required: true
-        default: 'northeurope'
+        default: 'westeurope'
         type: choice
         options:
           - eastus
           - westeurope
-          - northeurope
       create_resource_group:
         description: 'Create new resource group'
         required: true
         default: false
         type: boolean
+      due_date:
+        description: 'Due date for resources (YYYY-MM-DD)'
+        required: false
+        default: ''
+        type: string
 
 env:
   TF_WORKING_DIR: ${{ github.workspace }}
@@ -77,10 +81,23 @@ jobs:
       run: |
         echo "Creating Infrastructure Terraform state storage..."
         
-        # Set variables from workflow inputs
-        RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
-        ENVIRONMENT="${{ github.event.inputs.environment }}"
-        LOCATION="${{ github.event.inputs.location }}"
+        # Set variables from workflow inputs or defaults
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          LOCATION="${{ github.event.inputs.location }}"
+          DUE_DATE="${{ github.event.inputs.due_date }}"
+        else
+          RESOURCE_PREFIX="omerzlikin"
+          ENVIRONMENT="dev"
+          LOCATION="westeurope"
+          DUE_DATE=""
+        fi
+        
+        # Calculate due date if not provided
+        if [ -z "$DUE_DATE" ]; then
+          DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
+        fi
         
         # Backend naming convention
         BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
@@ -89,6 +106,10 @@ jobs:
         BACKEND_KEY="terraforminfra.tfstate"
         
         echo "Backend Configuration:"
+        echo "Resource Prefix: $RESOURCE_PREFIX"
+        echo "Environment: $ENVIRONMENT"
+        echo "Location: $LOCATION"
+        echo "Due Date: $DUE_DATE"
         echo "Resource Group: $BACKEND_RG_NAME"
         echo "Storage Account: $BACKEND_STORAGE_NAME"
         echo "Container: $BACKEND_CONTAINER_NAME"
@@ -141,6 +162,10 @@ jobs:
         echo "BACKEND_STORAGE_NAME=$BACKEND_STORAGE_NAME" >> $GITHUB_ENV
         echo "BACKEND_CONTAINER_NAME=$BACKEND_CONTAINER_NAME" >> $GITHUB_ENV
         echo "BACKEND_KEY=$BACKEND_KEY" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
+        echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+        echo "LOCATION=$LOCATION" >> $GITHUB_ENV
+        echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
@@ -155,52 +180,52 @@ jobs:
     - name: Terraform Plan/Apply/Destroy
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
-        # Calculate due date (current date + 5 days)
-        DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
+        # Use environment variables set in previous step
+        ACTION="${{ github.event.inputs.action || 'plan' }}"
         
-        if [ "${{ github.event.inputs.action }}" == "plan" ]; then
+        if [ "$ACTION" == "plan" ]; then
           echo "🔍 Planning Infrastructure Deployment..."
           terraform plan \
             -var="deploy_infrastructure=true" \
             -var="deploy_vms=false" \
             -var="deploy_avd=false" \
             -var="deploy_service_bus=false" \
-            -var="resource_prefix=${{ github.event.inputs.resource_prefix }}" \
-            -var="environment=${{ github.event.inputs.environment }}" \
-            -var="location=${{ github.event.inputs.location }}" \
-            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}" \
+            -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group || false }}" \
             -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
             -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
-            -var="due_date=$DUE_DATE" \
+            -var="due_date=${{ env.DUE_DATE }}" \
             -out=infra-plan
-        elif [ "${{ github.event.inputs.action }}" == "apply" ]; then
+        elif [ "$ACTION" == "apply" ]; then
           echo "🚀 Applying Infrastructure Deployment..."
           terraform apply -auto-approve \
             -var="deploy_infrastructure=true" \
             -var="deploy_vms=false" \
             -var="deploy_avd=false" \
             -var="deploy_service_bus=false" \
-            -var="resource_prefix=${{ github.event.inputs.resource_prefix }}" \
-            -var="environment=${{ github.event.inputs.environment }}" \
-            -var="location=${{ github.event.inputs.location }}" \
-            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}" \
+            -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group || false }}" \
             -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
             -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
-            -var="due_date=$DUE_DATE"
+            -var="due_date=${{ env.DUE_DATE }}"
           echo "✅ Infrastructure deployment completed"
-        elif [ "${{ github.event.inputs.action }}" == "destroy" ]; then
+        elif [ "$ACTION" == "destroy" ]; then
           echo "🗑️ Destroying Infrastructure..."
           terraform destroy -auto-approve \
             -var="deploy_infrastructure=true" \
             -var="deploy_vms=false" \
             -var="deploy_avd=false" \
             -var="deploy_service_bus=false" \
-            -var="resource_prefix=${{ github.event.inputs.resource_prefix }}" \
-            -var="environment=${{ github.event.inputs.environment }}" \
-            -var="location=${{ github.event.inputs.location }}" \
-            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}" \
+            -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group || false }}" \
             -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
             -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
-            -var="due_date=$DUE_DATE"
+            -var="due_date=${{ env.DUE_DATE }}"
           echo "✅ Infrastructure destruction completed"
         fi

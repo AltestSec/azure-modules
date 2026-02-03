@@ -137,64 +137,26 @@ jobs:
           DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
         fi
         
-        # Backend naming convention for VMs
+        # Backend naming convention for VMs (reuse infrastructure backend storage)
         BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
         BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
         BACKEND_CONTAINER_NAME="${RESOURCE_PREFIX}tfstatevm${ENVIRONMENT}"
         BACKEND_KEY="terraformvm.tfstate"
         
-        echo "Creating VM Terraform state storage with prefix: $RESOURCE_PREFIX"
+        echo "Creating VM Terraform state container (reusing infrastructure backend storage)..."
         echo "Backend Resource Group: $BACKEND_RG_NAME"
         echo "Backend Storage Account: $BACKEND_STORAGE_NAME"
         echo "Backend Container: $BACKEND_CONTAINER_NAME"
         echo "Backend Key: $BACKEND_KEY"
         echo "Due date: $DUE_DATE"
         
-        # Create resource group for Terraform state (reuse infrastructure backend)
-        az group create --name "$BACKEND_RG_NAME" --location "$LOCATION" --output none || true
-        
-        # Create storage account with versioning and RBAC (reuse infrastructure backend)
-        az storage account create \
-          --name "$BACKEND_STORAGE_NAME" \
-          --resource-group "$BACKEND_RG_NAME" \
-          --location "$LOCATION" \
-          --sku Standard_LRS \
-          --kind StorageV2 \
-          --allow-blob-public-access false \
-          --tags owner=${RESOURCE_PREFIX} createdBy=terraform component=backend \
-          --output none || true
-
-        az storage account blob-service-properties update \
-          --resource-group "$BACKEND_RG_NAME" \
-          --account-name "$BACKEND_STORAGE_NAME" \
-          --enable-versioning true
-        
-        # Create container for VM Terraform state
+        # Backend storage should already exist from infrastructure deployment
+        # Just create the VM-specific container
         az storage container create \
           --name "$BACKEND_CONTAINER_NAME" \
           --account-name "$BACKEND_STORAGE_NAME" \
           --auth-mode login \
           --output none || true
-        
-        # Get current user/service principal object ID
-        # Assign Storage Blob Data Contributor role for RBAC access
-        SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
-        SA_ID="$(az storage account show -g "$BACKEND_RG_NAME" -n "$BACKEND_STORAGE_NAME" --query id -o tsv)"
-
-        # create only if missing
-        if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
-          --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
-          for i in {1..30}; do
-            echo "Attempt Assign Blob Storage Contributor set ($i/30)..."
-            az role assignment create \
-              --assignee-object-id "$SP_OBJ_ID" \
-              --assignee-principal-type ServicePrincipal \
-              --role "Storage Blob Data Contributor" \
-              --scope "$SA_ID" \
-              -o none
-            sleep 5
-          done
-        fi
         
         echo "BACKEND_RG_NAME=$BACKEND_RG_NAME" >> $GITHUB_ENV
         echo "BACKEND_STORAGE_NAME=$BACKEND_STORAGE_NAME" >> $GITHUB_ENV
@@ -450,7 +412,7 @@ jobs:
           echo "DUE_DATE=${{ github.event.inputs.due_date }}" >> $GITHUB_ENV
           echo "LOCATION=${{ github.event.inputs.location }}" >> $GITHUB_ENV
           
-          # Set local variables for storage naming
+          # Set local variables for backend naming
           RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
           ENVIRONMENT="${{ github.event.inputs.environment }}"
         else
@@ -459,29 +421,34 @@ jobs:
           echo "VM_SIZE=Standard_B2als_v2" >> $GITHUB_ENV
           echo "ENVIRONMENT=dev" >> $GITHUB_ENV
           echo "RESOURCE_PREFIX=omerzlikin" >> $GITHUB_ENV
-          echo "DUE_DATE=2026-02-12" >> $GITHUB_ENV
+          echo "DUE_DATE=$(date -d '+5 days' +%Y-%m-%d)" >> $GITHUB_ENV
           echo "LOCATION=westeurope" >> $GITHUB_ENV
           
-          # Set local variables for storage naming
+          # Set local variables for backend naming
           RESOURCE_PREFIX="omerzlikin"
           ENVIRONMENT="dev"
         fi
         
-        # Use local variables (not env variables) for immediate use
-        STORAGE_NAME="${RESOURCE_PREFIX}tfstates"
-        RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
+        # Backend naming convention (same as infrastructure)
+        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
+        BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
+        BACKEND_CONTAINER_NAME="${RESOURCE_PREFIX}tfstatevm${ENVIRONMENT}"
+        BACKEND_KEY="terraformvm.tfstate"
         KV_NAME="${RESOURCE_PREFIX}-kv"
         
-        # Set storage-related environment variables
-        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
-        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        # Set backend-related environment variables
+        echo "BACKEND_RG_NAME=$BACKEND_RG_NAME" >> $GITHUB_ENV
+        echo "BACKEND_STORAGE_NAME=$BACKEND_STORAGE_NAME" >> $GITHUB_ENV
+        echo "BACKEND_CONTAINER_NAME=$BACKEND_CONTAINER_NAME" >> $GITHUB_ENV
+        echo "BACKEND_KEY=$BACKEND_KEY" >> $GITHUB_ENV
         echo "KV_NAME=$KV_NAME" >> $GITHUB_ENV
         
         # Debug output
         echo "Event: ${{ github.event_name }}"
         echo "Resource Prefix: $RESOURCE_PREFIX"
-        echo "Storage Account: $STORAGE_NAME"
-        echo "Resource Group: $RG_NAME"
+        echo "Backend Storage Account: $BACKEND_STORAGE_NAME"
+        echo "Backend Resource Group: $BACKEND_RG_NAME"
+        echo "Backend Container: $BACKEND_CONTAINER_NAME"
         echo "Key Vault: $KV_NAME"
 
     - name: Retrieve SSH Key
