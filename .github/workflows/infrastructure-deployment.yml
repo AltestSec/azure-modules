@@ -8,8 +8,9 @@ on:
     paths:
       - '.github/workflows/infrastructure-deployment.yml'
       - 'modules/infrastructure/**'
-      - 'main.tf'
-      - 'tfvar.tf'
+  pull_request:
+    branches:
+      - az_payground/**
   workflow_dispatch:
     inputs:
       environment:
@@ -53,16 +54,7 @@ on:
         required: false
         default: ''
         type: string
-  push:
-    branches:
-      - az_payground/**
-    paths:
-      - '.github/workflows/infrastructure-deployment.yml'
-  pull_request:
-    branches:
-      - az_payground/**
-    paths:
-      - '.github/workflows/infrastructure-deployment.yml'
+
 
 env:
   TF_WORKING_DIR: ${{ github.workspace }}
