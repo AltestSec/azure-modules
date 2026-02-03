@@ -79,11 +79,12 @@ jobs:
 
     - name: Setup Terraform Backend for Infrastructure
       run: |
-        echo "Creating Infrastructure Terraform state storage..."
+        echo "Creating Shared Terraform Backend Storage..."
         
         # Set variables from workflow inputs or defaults
         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
           RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          GITHUB_WORKFLOW="{{ github.workflow }}"
           ENVIRONMENT="${{ github.event.inputs.environment }}"
           LOCATION="${{ github.event.inputs.location }}"
           DUE_DATE="${{ github.event.inputs.due_date }}"
@@ -99,26 +100,26 @@ jobs:
           DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
         fi
         
-        # Backend naming convention
-        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
+        # Consolidated backend naming - ONE storage account for all components
+        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
         BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
-        BACKEND_CONTAINER_NAME="${RESOURCE_PREFIX}tfstateinfra${ENVIRONMENT}"
-        BACKEND_KEY="terraforminfra.tfstate"
+        BACKEND_CONTAINER_NAME="tfstate-${ENVIRONMENT}"
+        BACKEND_KEY="infrastructure.tfstate"
         
-        echo "Backend Configuration:"
+        echo "Consolidated Backend Configuration:"
         echo "Resource Prefix: $RESOURCE_PREFIX"
         echo "Environment: $ENVIRONMENT"
         echo "Location: $LOCATION"
         echo "Due Date: $DUE_DATE"
-        echo "Resource Group: $BACKEND_RG_NAME"
-        echo "Storage Account: $BACKEND_STORAGE_NAME"
-        echo "Container: $BACKEND_CONTAINER_NAME"
-        echo "Key: $BACKEND_KEY"
+        echo "Backend Resource Group: $BACKEND_RG_NAME (SHARED)"
+        echo "Backend Storage Account: $BACKEND_STORAGE_NAME (SHARED)"
+        echo "Backend Container: $BACKEND_CONTAINER_NAME (SHARED)"
+        echo "Backend Key: $BACKEND_KEY (COMPONENT-SPECIFIC)"
         
-        # Create backend resource group
+        # Create ONE backend resource group for all components
         az group create --name "$BACKEND_RG_NAME" --location "$LOCATION" --output none || true
         
-        # Create backend storage account
+        # Create ONE backend storage account for all components
         az storage account create \
           --name "$BACKEND_STORAGE_NAME" \
           --resource-group "$BACKEND_RG_NAME" \
@@ -126,7 +127,7 @@ jobs:
           --sku Standard_LRS \
           --kind StorageV2 \
           --allow-blob-public-access false \
-          --tags owner=$RESOURCE_PREFIX createdBy=terraform component=backend \
+          --tags owner=$RESOURCE_PREFIX createdBy=terraform component=shared-backend dueDate="$DUE_DATE" \
           --output none || true
 
         # Enable versioning
@@ -135,7 +136,7 @@ jobs:
           --account-name "$BACKEND_STORAGE_NAME" \
           --enable-versioning true
         
-        # Create container for Infrastructure state
+        # Create ONE shared container for all terraform states
         az storage container create \
           --name "$BACKEND_CONTAINER_NAME" \
           --account-name "$BACKEND_STORAGE_NAME" \

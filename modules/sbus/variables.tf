@@ -14,6 +14,17 @@ variable "environment" {
   type        = string
 }
 
+variable "resource_prefix" {
+  description = "Prefix for all resources"
+  type        = string
+}
+
+variable "common_tags" {
+  description = "Common tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
 variable "service_bus_topic_name" {
   description = "Name of the Service Bus topic"
   type        = string

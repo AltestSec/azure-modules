@@ -88,58 +88,24 @@ jobs:
           ENVIRONMENT="dev"
         fi
         
-        # Storage configuration
-        STORAGE_NAME="${RESOURCE_PREFIX}sbustfstates"
-        RG_NAME="${RESOURCE_PREFIX}-sbus-tfstate-rg"
+        # Storage configuration (shared backend)
+        STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
+        RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
         
         echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
         echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
 
     - name: Setup Terraform Backend for Service Bus
       run: |
-        echo "Creating Service Bus Terraform state storage..."
+        echo "Using Shared Terraform Backend Storage for Service Bus..."
         
-        # Create resource group for Service Bus Terraform state
-        az group create --name "${{ env.TFSTATE_RG_NAME }}" --location "${{ env.LOCATION }}" --output none || true
+        # Backend storage should already exist from infrastructure deployment
+        # Just use the shared container with Service Bus-specific state file
         
-        # Create storage account for Service Bus state
-        az storage account create \
-          --name "${{ env.STORAGE_ACCOUNT_NAME }}" \
-          --resource-group "${{ env.TFSTATE_RG_NAME }}" \
-          --location "${{ env.LOCATION }}" \
-          --sku Standard_LRS \
-          --kind StorageV2 \
-          --allow-blob-public-access false \
-          --tags owner=${{ env.RESOURCE_PREFIX }} createdBy=terraform component=service-bus \
-          --output none || true
-
-        # Enable versioning
-        az storage account blob-service-properties update \
-          --resource-group "${{ env.TFSTATE_RG_NAME }}" \
-          --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
-          --enable-versioning true
-        
-        # Create container for Service Bus Terraform state
-        az storage container create \
-          --name "sbus-tfstate-${{ env.ENVIRONMENT }}" \
-          --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
-          --auth-mode login \
-          --output none || true
-        
-        # Setup RBAC for service principal
-        SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
-        SA_ID="$(az storage account show -g "${{ env.TFSTATE_RG_NAME }}" -n "${{ env.STORAGE_ACCOUNT_NAME }}" --query id -o tsv)"
-
-        if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
-          --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
-          az role assignment create \
-            --assignee-object-id "$SP_OBJ_ID" \
-            --assignee-principal-type ServicePrincipal \
-            --role "Storage Blob Data Contributor" \
-            --scope "$SA_ID" \
-            --output none
-          sleep 5
-        fi
+        echo "Backend Resource Group: ${{ env.TFSTATE_RG_NAME }} (SHARED)"
+        echo "Backend Storage Account: ${{ env.STORAGE_ACCOUNT_NAME }} (SHARED)"
+        echo "Backend Container: tfstate-${{ env.ENVIRONMENT }} (SHARED)"
+        echo "Backend Key: service-bus.tfstate (SERVICE-BUS-SPECIFIC)"
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
@@ -147,7 +113,7 @@ jobs:
         terraform init \
           -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
           -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
-          -backend-config="container_name=sbus-tfstate-${{ env.ENVIRONMENT }}" \
+          -backend-config="container_name=tfstate-${{ env.ENVIRONMENT }}" \
           -backend-config="key=service-bus.tfstate" \
           -backend-config="use_azuread_auth=true"
 

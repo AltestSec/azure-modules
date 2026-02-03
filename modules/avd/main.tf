@@ -7,8 +7,8 @@ data "azurerm_resource_group" "avd_rg" {
 }
 
 data "azurerm_subnet" "avd_subnet" {
-  name                 = "subnet-avd"
-  virtual_network_name = "vnet-${var.environment}"
+  name                 = "${var.resource_prefix}-subnet-avd-${var.environment}"
+  virtual_network_name = "${var.resource_prefix}-vnet-${var.environment}"
   resource_group_name  = var.resource_group_name
 }
 
@@ -17,11 +17,10 @@ data "azurerm_subnet" "avd_subnet" {
 # For now, we'll create a placeholder that can be expanded
 
 locals {
-  common_tags = {
-    Environment = var.environment
-    Component   = "AVD"
-    ManagedBy   = "Terraform"
-  }
+  common_tags = merge(var.common_tags, {
+    Component = "AVD"
+    Purpose   = "VirtualDesktop"
+  })
 }
 
 # Placeholder for AVD resources
@@ -33,7 +32,7 @@ resource "azurerm_virtual_desktop_host_pool" "main" {
   location            = data.azurerm_resource_group.avd_rg.location
   resource_group_name = data.azurerm_resource_group.avd_rg.name
 
-  name                     = "avd-hostpool-${var.environment}"
+  name                     = "${var.resource_prefix}-avd-hostpool-${var.environment}"
   friendly_name            = "AVD Host Pool ${title(var.environment)}"
   validate_environment     = true
   start_vm_on_connect      = true
@@ -48,7 +47,7 @@ resource "azurerm_virtual_desktop_host_pool" "main" {
 
 # AVD Workspace
 resource "azurerm_virtual_desktop_workspace" "main" {
-  name                = "avd-workspace-${var.environment}"
+  name                = "${var.resource_prefix}-avd-workspace-${var.environment}"
   location            = data.azurerm_resource_group.avd_rg.location
   resource_group_name = data.azurerm_resource_group.avd_rg.name
 
@@ -60,7 +59,7 @@ resource "azurerm_virtual_desktop_workspace" "main" {
 
 # AVD Application Group
 resource "azurerm_virtual_desktop_application_group" "main" {
-  name                = "avd-appgroup-${var.environment}"
+  name                = "${var.resource_prefix}-avd-appgroup-${var.environment}"
   location            = data.azurerm_resource_group.avd_rg.location
   resource_group_name = data.azurerm_resource_group.avd_rg.name
 

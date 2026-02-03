@@ -137,26 +137,21 @@ jobs:
           DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
         fi
         
-        # Backend naming convention for VMs (reuse infrastructure backend storage)
-        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
+        # Backend naming convention for VMs (reuse shared backend storage)
+        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
         BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
-        BACKEND_CONTAINER_NAME="${RESOURCE_PREFIX}tfstatevm${ENVIRONMENT}"
-        BACKEND_KEY="terraformvm.tfstate"
+        BACKEND_CONTAINER_NAME="tfstate-${ENVIRONMENT}"
+        BACKEND_KEY="vm.tfstate"
         
-        echo "Creating VM Terraform state container (reusing infrastructure backend storage)..."
-        echo "Backend Resource Group: $BACKEND_RG_NAME"
-        echo "Backend Storage Account: $BACKEND_STORAGE_NAME"
-        echo "Backend Container: $BACKEND_CONTAINER_NAME"
-        echo "Backend Key: $BACKEND_KEY"
+        echo "Using Shared Terraform Backend Storage..."
+        echo "Backend Resource Group: $BACKEND_RG_NAME (SHARED)"
+        echo "Backend Storage Account: $BACKEND_STORAGE_NAME (SHARED)"
+        echo "Backend Container: $BACKEND_CONTAINER_NAME (SHARED)"
+        echo "Backend Key: $BACKEND_KEY (VM-SPECIFIC)"
         echo "Due date: $DUE_DATE"
         
         # Backend storage should already exist from infrastructure deployment
-        # Just create the VM-specific container
-        az storage container create \
-          --name "$BACKEND_CONTAINER_NAME" \
-          --account-name "$BACKEND_STORAGE_NAME" \
-          --auth-mode login \
-          --output none || true
+        # Container should also already exist - no need to create anything
         
         echo "BACKEND_RG_NAME=$BACKEND_RG_NAME" >> $GITHUB_ENV
         echo "BACKEND_STORAGE_NAME=$BACKEND_STORAGE_NAME" >> $GITHUB_ENV
@@ -429,11 +424,11 @@ jobs:
           ENVIRONMENT="dev"
         fi
         
-        # Backend naming convention (same as infrastructure)
-        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
+        # Backend naming convention (shared with infrastructure)
+        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
         BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
-        BACKEND_CONTAINER_NAME="${RESOURCE_PREFIX}tfstatevm${ENVIRONMENT}"
-        BACKEND_KEY="terraformvm.tfstate"
+        BACKEND_CONTAINER_NAME="tfstate-${ENVIRONMENT}"
+        BACKEND_KEY="vm.tfstate"
         KV_NAME="${RESOURCE_PREFIX}-kv"
         
         # Set backend-related environment variables
@@ -446,9 +441,10 @@ jobs:
         # Debug output
         echo "Event: ${{ github.event_name }}"
         echo "Resource Prefix: $RESOURCE_PREFIX"
-        echo "Backend Storage Account: $BACKEND_STORAGE_NAME"
-        echo "Backend Resource Group: $BACKEND_RG_NAME"
-        echo "Backend Container: $BACKEND_CONTAINER_NAME"
+        echo "Backend Storage Account: $BACKEND_STORAGE_NAME (SHARED)"
+        echo "Backend Resource Group: $BACKEND_RG_NAME (SHARED)"
+        echo "Backend Container: $BACKEND_CONTAINER_NAME (SHARED)"
+        echo "Backend Key: $BACKEND_KEY (VM-SPECIFIC)"
         echo "Key Vault: $KV_NAME"
 
     - name: Retrieve SSH Key

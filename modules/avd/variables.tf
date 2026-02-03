@@ -14,3 +14,14 @@ variable "environment" {
   description = "Environment name"
   type        = string
 }
+
+variable "resource_prefix" {
+  description = "Prefix for all resources"
+  type        = string
+}
+
+variable "common_tags" {
+  description = "Common tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
