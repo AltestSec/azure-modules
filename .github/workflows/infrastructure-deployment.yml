@@ -3,7 +3,7 @@ name: 'Infrastructure Deployment'
 on:
   push:
     branches:
-      - 'playground/**'
+      - az_payground/**
     paths:
       - '.github/workflows/infrastructure-deployment.yml'
   workflow_dispatch:
