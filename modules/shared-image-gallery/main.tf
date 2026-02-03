@@ -16,6 +16,7 @@ resource "azurerm_container_registry" "main" {
   #sku                 = var.acr_sku
   sku                 = "Standard"
   admin_enabled       = true
+  retention_policy_in_days = "90"
 
   public_network_access_enabled = false
   network_rule_bypass_option    = "AzureServices"
