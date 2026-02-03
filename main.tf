@@ -2,59 +2,6 @@
 # This file serves as the main orchestrator for different deployment components
 # Use feature flags to control which components to deploy
 
-# Terraform configuration
-#terraform {
-#  required_version = ">= 1.0"
-#  required_providers {
-#    azurerm = {
-#      source  = "hashicorp/azurerm"
-#      version = "~> 3.0"
-#    }
-#  }
-  
-#  backend "azurerm" {
-    # Backend configuration will be provided via init command
-#  }
-#}
-
-# Configure the Microsoft Azure Provider
-#provider "azurerm" {
-#  features {
-#    resource_group {
-#      prevent_deletion_if_contains_resources = false
-#    }
-#    key_vault {
-#      purge_soft_delete_on_destroy    = true
-#      recover_soft_deleted_key_vaults = true
-#    }
-#  }
-#}
-
-# Feature flags to control deployment components
-#variable "deploy_infrastructure" {
-#  description = "Deploy basic infrastructure (RG, VNet, Subnets)"
-#  type        = bool
-#  default     = false
-#}
-
-#variable "deploy_vms" {
-#  description = "Deploy VM resources"
-#  type        = bool
-#  default     = false
-#}
-
-#variable "deploy_avd" {
-#  description = "Deploy AVD resources"
-#  type        = bool
-#  default     = false
-#}
-
-#variable "deploy_service_bus" {
-#  description = "Deploy Service Bus resources"
-#  type        = bool
-#  default     = false
-#}
-
 # Infrastructure Module (conditional)
 module "infrastructure" {
   count  = var.deploy_infrastructure ? 1 : 0

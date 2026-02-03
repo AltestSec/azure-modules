@@ -1,6 +1,15 @@
 name: 'Infrastructure Deployment'
 
 on:
+  push:
+    branches:
+      - main
+      - az_payground/**
+    paths:
+      - '.github/workflows/infrastructure-deployment.yml'
+      - 'modules/infrastructure/**'
+      - 'main.tf'
+      - 'tfvar.tf'
   workflow_dispatch:
     inputs:
       environment:

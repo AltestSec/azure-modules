@@ -142,11 +142,12 @@ locals {
     createdDate = formatdate("YYYY-MM-DD", timestamp())
   }
   
-  # Backend configuration values (for reference)
+  # Backend configuration values (for reference) - CONSOLIDATED APPROACH
   backend_config = {
-    resource_group_name  = "${var.resource_prefix}-tfresources-rg"
-    storage_account_name = "${var.resource_prefix}tfstatestorage"
-    # Container name will be set per workflow: {prefix}tfstate{workflow}{environment}
-    # Key will be set per workflow: terraform{workflow}.tfstate
+    resource_group_name  = "${var.resource_prefix}-tfstate-rg"        # ONE shared RG for all backends
+    storage_account_name = "${var.resource_prefix}tfstatestorage"     # ONE shared storage account
+    container_name       = "tfstate-${var.environment}"              # ONE shared container per environment
+    # Component-specific keys:
+    # infrastructure.tfstate, vm-resources.tfstate, avd.tfstate, service-bus.tfstate
   }
 }

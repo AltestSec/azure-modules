@@ -10,12 +10,14 @@ terraform {
 
   # Backend configuration will be provided via terraform init -backend-config
   # This allows dynamic backend configuration based on workflow inputs
+  # CONSOLIDATED BACKEND: All components share ONE backend storage setup
   backend "azurerm" {
     # Configuration provided via init command:
-    # resource_group_name  = "{prefix}-tfresources-rg"
-    # storage_account_name = "{prefix}tfstatestorage"
-    # container_name       = "{prefix}tfstate{workflow}{environment}"
-    # key                  = "terraform{workflow}.tfstate"
+    # resource_group_name  = "{prefix}-tfstate-rg"           (SHARED)
+    # storage_account_name = "{prefix}tfstatestorage"        (SHARED)  
+    # container_name       = "tfstate-{environment}"         (SHARED)
+    # key                  = "{component}.tfstate"           (COMPONENT-SPECIFIC)
+    # use_azuread_auth     = true
   }
 }
 

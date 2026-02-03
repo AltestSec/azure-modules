@@ -40,7 +40,11 @@ on:
         type: choice
         options:
           - eastus
-          - westeurope
+      due_date:
+        description: 'Due date for resources (YYYY-MM-DD)'
+        required: false
+        default: ''
+        type: string
 
 env:
   TF_WORKING_DIR: ${{ github.workspace }}
@@ -70,51 +74,68 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Set Variables
-      run: |
-        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
-          echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
-          echo "LOCATION=${{ github.event.inputs.location }}" >> $GITHUB_ENV
-          
-          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
-          ENVIRONMENT="${{ github.event.inputs.environment }}"
-        else
-          echo "ENVIRONMENT=dev" >> $GITHUB_ENV
-          echo "RESOURCE_PREFIX=omerzlikin" >> $GITHUB_ENV
-          echo "LOCATION=westeurope" >> $GITHUB_ENV
-          
-          RESOURCE_PREFIX="omerzlikin"
-          ENVIRONMENT="dev"
-        fi
-        
-        # Storage configuration (shared backend)
-        STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
-        RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
-        
-        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
-        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+
 
     - name: Setup Terraform Backend for Service Bus
       run: |
         echo "Using Shared Terraform Backend Storage for Service Bus..."
         
-        # Backend storage should already exist from infrastructure deployment
-        # Just use the shared container with Service Bus-specific state file
+        # Set variables from workflow inputs or defaults
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          LOCATION="${{ github.event.inputs.location }}"
+        else
+          RESOURCE_PREFIX="omerzlikin"
+          ENVIRONMENT="dev"
+          LOCATION="westeurope"
+        fi
         
-        echo "Backend Resource Group: ${{ env.TFSTATE_RG_NAME }} (SHARED)"
-        echo "Backend Storage Account: ${{ env.STORAGE_ACCOUNT_NAME }} (SHARED)"
-        echo "Backend Container: tfstate-${{ env.ENVIRONMENT }} (SHARED)"
-        echo "Backend Key: service-bus.tfstate (SERVICE-BUS-SPECIFIC)"
+        # Calculate due date
+        DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
+        
+        # Consolidated backend naming - SHARED with infrastructure
+        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
+        BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
+        BACKEND_CONTAINER_NAME="tfstate-${ENVIRONMENT}"
+        BACKEND_KEY="service-bus.tfstate"
+        
+        echo "Consolidated Backend Configuration:"
+        echo "Resource Prefix: $RESOURCE_PREFIX"
+        echo "Environment: $ENVIRONMENT"
+        echo "Location: $LOCATION"
+        echo "Due Date: $DUE_DATE"
+        echo "Backend Resource Group: $BACKEND_RG_NAME (SHARED)"
+        echo "Backend Storage Account: $BACKEND_STORAGE_NAME (SHARED)"
+        echo "Backend Container: $BACKEND_CONTAINER_NAME (SHARED)"
+        echo "Backend Key: $BACKEND_KEY (SERVICE-BUS-SPECIFIC)"
+        
+        # Backend storage should already exist from infrastructure deployment
+        if ! az storage account show --name "$BACKEND_STORAGE_NAME" --resource-group "$BACKEND_RG_NAME" --output none 2>/dev/null; then
+          echo "❌ Backend storage not found. Please run Infrastructure Deployment first."
+          exit 1
+        fi
+        
+        echo "✅ Backend storage verified"
+        
+        # Export for next steps
+        echo "BACKEND_RG_NAME=$BACKEND_RG_NAME" >> $GITHUB_ENV
+        echo "BACKEND_STORAGE_NAME=$BACKEND_STORAGE_NAME" >> $GITHUB_ENV
+        echo "BACKEND_CONTAINER_NAME=$BACKEND_CONTAINER_NAME" >> $GITHUB_ENV
+        echo "BACKEND_KEY=$BACKEND_KEY" >> $GITHUB_ENV
+        echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
+        echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+        echo "LOCATION=$LOCATION" >> $GITHUB_ENV
+        echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
 
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
-          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
-          -backend-config="container_name=tfstate-${{ env.ENVIRONMENT }}" \
-          -backend-config="key=service-bus.tfstate" \
+          -backend-config="resource_group_name=${{ env.BACKEND_RG_NAME }}" \
+          -backend-config="storage_account_name=${{ env.BACKEND_STORAGE_NAME }}" \
+          -backend-config="container_name=${{ env.BACKEND_CONTAINER_NAME }}" \
+          -backend-config="key=${{ env.BACKEND_KEY }}" \
           -backend-config="use_azuread_auth=true"
 
     - name: Terraform Plan/Apply/Destroy
@@ -127,11 +148,13 @@ jobs:
             -var="deploy_vms=false" \
             -var="deploy_avd=false" \
             -var="deploy_service_bus=true" \
-            -var="resource_group_name=${{ env.RESOURCE_PREFIX }}-rg-${{ env.ENVIRONMENT }}" \
+            -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="location=${{ env.LOCATION }}" \
+            -var="create_resource_group=false" \
             -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
             -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -var="due_date=${{ env.DUE_DATE }}" \
             -out=sbus-plan
         elif [ "${{ github.event.inputs.action }}" == "apply" ]; then
           echo "🚀 Applying Service Bus Deployment..."
@@ -140,11 +163,13 @@ jobs:
             -var="deploy_vms=false" \
             -var="deploy_avd=false" \
             -var="deploy_service_bus=true" \
-            -var="resource_group_name=${{ env.RESOURCE_PREFIX }}-rg-${{ env.ENVIRONMENT }}" \
+            -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="location=${{ env.LOCATION }}" \
+            -var="create_resource_group=false" \
             -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
-            -var="tenant_id=${{ env.ARM_TENANT_ID }}"
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -var="due_date=${{ env.DUE_DATE }}"
           echo "✅ Service Bus deployment completed"
         elif [ "${{ github.event.inputs.action }}" == "destroy" ]; then
           echo "🗑️ Destroying Service Bus Infrastructure..."
@@ -153,11 +178,13 @@ jobs:
             -var="deploy_vms=false" \
             -var="deploy_avd=false" \
             -var="deploy_service_bus=true" \
-            -var="resource_group_name=${{ env.RESOURCE_PREFIX }}-rg-${{ env.ENVIRONMENT }}" \
+            -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="location=${{ env.LOCATION }}" \
+            -var="create_resource_group=false" \
             -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
-            -var="tenant_id=${{ env.ARM_TENANT_ID }}"
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -var="due_date=${{ env.DUE_DATE }}"
           echo "✅ Service Bus destruction completed"
         fi
 
