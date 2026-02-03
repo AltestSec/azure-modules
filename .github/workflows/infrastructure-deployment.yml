@@ -1,6 +1,11 @@
 name: 'Infrastructure Deployment'
 
 on:
+  push:
+    branches:
+      - 'playground/**'
+    paths:
+      - '.github/workflows/infrastructure-deployment.yml'
   workflow_dispatch:
     inputs:
       environment:
