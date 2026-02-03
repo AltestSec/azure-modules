@@ -34,11 +34,12 @@ on:
       location:
         description: 'Azure Location'
         required: true
-        default: 'westeurope'
+        default: 'northeurope'
         type: choice
         options:
           - eastus
           - westeurope
+          - northeurope
       create_resource_group:
         description: 'Create new resource group'
         required: true

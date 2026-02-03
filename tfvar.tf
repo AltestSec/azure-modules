@@ -24,7 +24,7 @@ variable "resource_group_name" {
 variable "location" {
   description = "Azure location for the resources"
   type        = string
-  default     = "West Europe"
+  default     = "northeurope"
 }
 
 variable "environment" {
