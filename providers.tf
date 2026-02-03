@@ -8,11 +8,14 @@ terraform {
     }
   }
 
+  # Backend configuration will be provided via terraform init -backend-config
+  # This allows dynamic backend configuration based on workflow inputs
   backend "azurerm" {
-    resource_group_name  = "tfstate-rg"
-    storage_account_name = "tfstatestorage"
-    container_name       = "tfstate"
-    key                  = "terraform.tfstate"
+    # Configuration provided via init command:
+    # resource_group_name  = "{prefix}-tfresources-rg"
+    # storage_account_name = "{prefix}tfstatestorage"
+    # container_name       = "{prefix}tfstate{workflow}{environment}"
+    # key                  = "terraform{workflow}.tfstate"
   }
 }
 
@@ -20,6 +23,13 @@ provider "azurerm" {
   features {
     virtual_machine {
       delete_os_disk_on_deletion = true
+    }
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+    key_vault {
+      purge_soft_delete_on_destroy    = true
+      recover_soft_deleted_key_vaults = true
     }
   }
 

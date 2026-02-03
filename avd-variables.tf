@@ -60,11 +60,11 @@ variable "avd_admin_username" {
   default     = "avdadmin"
 }
 
-variable "avd_admin_password" {
-  description = "Admin password for AVD session hosts"
-  type        = string
-  sensitive   = true
-}
+#variable "avd_admin_password" {
+#  description = "Admin password for AVD session hosts"
+#  type        = string
+#  sensitive   = true
+#}
 
 variable "use_aad_join" {
   description = "Use Azure AD join instead of domain join"

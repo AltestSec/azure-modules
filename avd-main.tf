@@ -3,7 +3,7 @@
 
 locals {
   # Common tags for all resources
-  common_tags = {
+  commonavd_tags = {
     Environment = var.environment
     Project     = "AVD-Infrastructure"
     ManagedBy   = "Terraform"
@@ -92,13 +92,13 @@ locals {
 resource "azurerm_resource_group" "avd_eu" {
   name     = "rg-avd-${var.environment}-${local.locations.primary.short_name}"
   location = var.primary_location
-  tags     = local.common_tags
+  tags     = local.commonavd_tags
 }
 
 resource "azurerm_resource_group" "avd_us" {
   name     = "rg-avd-${var.environment}-${local.locations.secondary.short_name}"
   location = var.secondary_location
-  tags     = local.common_tags
+  tags     = local.commonavd_tags
 }
 
 # Virtual Networks for each region
@@ -107,7 +107,7 @@ resource "azurerm_virtual_network" "avd_eu" {
   address_space       = ["10.1.0.0/16"]
   location            = azurerm_resource_group.avd_eu.location
   resource_group_name = azurerm_resource_group.avd_eu.name
-  tags                = local.common_tags
+  tags                = local.commonavd_tags
 }
 
 resource "azurerm_virtual_network" "avd_us" {
@@ -115,7 +115,7 @@ resource "azurerm_virtual_network" "avd_us" {
   address_space       = ["10.2.0.0/16"]
   location            = azurerm_resource_group.avd_us.location
   resource_group_name = azurerm_resource_group.avd_us.name
-  tags                = local.common_tags
+  tags                = local.commonavd_tags
 }
 
 # Subnets for AVD Session Hosts
@@ -178,7 +178,7 @@ resource "azurerm_network_security_group" "avd_eu" {
     destination_address_prefix = "*"
   }
 
-  tags = local.common_tags
+  tags = local.commonavd_tags
 }
 
 resource "azurerm_network_security_group" "avd_us" {
@@ -210,7 +210,7 @@ resource "azurerm_network_security_group" "avd_us" {
     destination_address_prefix = "*"
   }
 
-  tags = local.common_tags
+  tags = local.commonavd_tags
 }
 
 # Associate NSGs with subnets
@@ -238,7 +238,7 @@ module "shared_image_gallery" {
   acr_sku                    = "Standard"
   image_retention_days       = 60
   allowed_ip_ranges          = var.allowed_ip_ranges
-  tags                       = local.common_tags
+  tags                       = local.commonavd_tags
 }
 
 # AVD Workspaces
@@ -249,7 +249,7 @@ module "avd_workspace_eu" {
   location            = azurerm_resource_group.avd_eu.location
   location_short      = local.locations.primary.short_name
   environment         = var.environment
-  tags                = local.common_tags
+  tags                = local.commonavd_tags
 }
 
 module "avd_workspace_us" {
@@ -259,7 +259,7 @@ module "avd_workspace_us" {
   location            = azurerm_resource_group.avd_us.location
   location_short      = local.locations.secondary.short_name
   environment         = var.environment
-  tags                = local.common_tags
+  tags                = local.commonavd_tags
 }
 
 # AVD Host Pools
@@ -281,7 +281,7 @@ module "avd_hostpool_dev_eu" {
   peak_hours_start           = local.pool_configs.dev_eu.peak_hours_start
   ramp_down_start            = local.pool_configs.dev_eu.ramp_down_start
   off_peak_start             = local.pool_configs.dev_eu.off_peak_start
-  tags                       = local.common_tags
+  tags                       = local.commonavd_tags
 }
 
 module "avd_hostpool_dev_us" {
@@ -302,7 +302,7 @@ module "avd_hostpool_dev_us" {
   peak_hours_start           = local.pool_configs.dev_us.peak_hours_start
   ramp_down_start            = local.pool_configs.dev_us.ramp_down_start
   off_peak_start             = local.pool_configs.dev_us.off_peak_start
-  tags                       = local.common_tags
+  tags                       = local.commonavd_tags
 }
 
 module "avd_hostpool_mgmt_us" {
@@ -323,7 +323,7 @@ module "avd_hostpool_mgmt_us" {
   peak_hours_start           = local.pool_configs.mgmt_us.peak_hours_start
   ramp_down_start            = local.pool_configs.mgmt_us.ramp_down_start
   off_peak_start             = local.pool_configs.mgmt_us.off_peak_start
-  tags                       = local.common_tags
+  tags                       = local.commonavd_tags
 }
 
 # AVD Session Hosts
@@ -354,7 +354,7 @@ module "avd_sessionhosts_dev_eu" {
   #auto_shutdown_enabled      = var.auto_shutdown_enabled
   shutdown_time = local.pool_configs.dev_eu.shutdown_time
   timezone      = local.pool_configs.dev_eu.timezone
-  tags          = local.common_tags
+  tags          = local.commonavd_tags
 }
 
 module "avd_sessionhosts_dev_us" {
@@ -383,7 +383,7 @@ module "avd_sessionhosts_dev_us" {
   #auto_shutdown_enabled      = var.auto_shutdown_enabled
   shutdown_time = local.pool_configs.dev_us.shutdown_time
   timezone      = local.pool_configs.dev_us.timezone
-  tags          = local.common_tags
+  tags          = local.commonavd_tags
 }
 
 module "avd_sessionhosts_mgmt_us" {
@@ -412,5 +412,5 @@ module "avd_sessionhosts_mgmt_us" {
   #auto_shutdown_enabled      = var.auto_shutdown_enabled
   shutdown_time = local.pool_configs.mgmt_us.shutdown_time
   timezone      = local.pool_configs.mgmt_us.timezone
-  tags          = local.common_tags
+  tags          = local.commonavd_tags
 }

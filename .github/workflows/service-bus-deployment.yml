@@ -1,0 +1,204 @@
+name: 'Service Bus Deployment'
+
+on:
+  push:
+    branches:
+      - az_payground/**
+    paths:
+      - 'modules/sbus/**'
+      - 'service-bus.tf'
+      - '.github/workflows/service-bus-deployment.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      action:
+        description: 'Terraform Action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      resource_prefix:
+        description: 'Resource prefix'
+        required: true
+        default: 'omerzlikin'
+        type: string
+      location:
+        description: 'Azure Location'
+        required: true
+        default: 'westeurope'
+        type: choice
+        options:
+          - eastus
+          - westeurope
+
+env:
+  TF_WORKING_DIR: ${{ github.workspace }}
+  ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+  ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+  ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+  ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
+  ARM_USE_MSI: false
+
+jobs:
+  terraform-service-bus:
+    name: 'Deploy Service Bus'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.0
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set Variables
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "RESOURCE_PREFIX=${{ github.event.inputs.resource_prefix }}" >> $GITHUB_ENV
+          echo "LOCATION=${{ github.event.inputs.location }}" >> $GITHUB_ENV
+          
+          RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+        else
+          echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+          echo "RESOURCE_PREFIX=omerzlikin" >> $GITHUB_ENV
+          echo "LOCATION=westeurope" >> $GITHUB_ENV
+          
+          RESOURCE_PREFIX="omerzlikin"
+          ENVIRONMENT="dev"
+        fi
+        
+        # Storage configuration
+        STORAGE_NAME="${RESOURCE_PREFIX}sbustfstates"
+        RG_NAME="${RESOURCE_PREFIX}-sbus-tfstate-rg"
+        
+        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
+        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+
+    - name: Setup Terraform Backend for Service Bus
+      run: |
+        echo "Creating Service Bus Terraform state storage..."
+        
+        # Create resource group for Service Bus Terraform state
+        az group create --name "${{ env.TFSTATE_RG_NAME }}" --location "${{ env.LOCATION }}" --output none || true
+        
+        # Create storage account for Service Bus state
+        az storage account create \
+          --name "${{ env.STORAGE_ACCOUNT_NAME }}" \
+          --resource-group "${{ env.TFSTATE_RG_NAME }}" \
+          --location "${{ env.LOCATION }}" \
+          --sku Standard_LRS \
+          --kind StorageV2 \
+          --allow-blob-public-access false \
+          --tags owner=${{ env.RESOURCE_PREFIX }} createdBy=terraform component=service-bus \
+          --output none || true
+
+        # Enable versioning
+        az storage account blob-service-properties update \
+          --resource-group "${{ env.TFSTATE_RG_NAME }}" \
+          --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
+          --enable-versioning true
+        
+        # Create container for Service Bus Terraform state
+        az storage container create \
+          --name "sbus-tfstate-${{ env.ENVIRONMENT }}" \
+          --account-name "${{ env.STORAGE_ACCOUNT_NAME }}" \
+          --auth-mode login \
+          --output none || true
+        
+        # Setup RBAC for service principal
+        SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
+        SA_ID="$(az storage account show -g "${{ env.TFSTATE_RG_NAME }}" -n "${{ env.STORAGE_ACCOUNT_NAME }}" --query id -o tsv)"
+
+        if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
+          --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
+          az role assignment create \
+            --assignee-object-id "$SP_OBJ_ID" \
+            --assignee-principal-type ServicePrincipal \
+            --role "Storage Blob Data Contributor" \
+            --scope "$SA_ID" \
+            --output none
+          sleep 5
+        fi
+
+    - name: Terraform Init
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
+          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
+          -backend-config="container_name=sbus-tfstate-${{ env.ENVIRONMENT }}" \
+          -backend-config="key=service-bus.tfstate" \
+          -backend-config="use_azuread_auth=true"
+
+    - name: Terraform Plan/Apply/Destroy
+      working-directory: ${{ env.TF_WORKING_DIR }}
+      run: |
+        if [ "${{ github.event.inputs.action }}" == "plan" ]; then
+          echo "🔍 Planning Service Bus Deployment..."
+          terraform plan \
+            -var="deploy_infrastructure=false" \
+            -var="deploy_vms=false" \
+            -var="deploy_avd=false" \
+            -var="deploy_service_bus=true" \
+            -var="resource_group_name=${{ env.RESOURCE_PREFIX }}-rg-${{ env.ENVIRONMENT }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -out=sbus-plan
+        elif [ "${{ github.event.inputs.action }}" == "apply" ]; then
+          echo "🚀 Applying Service Bus Deployment..."
+          terraform apply -auto-approve \
+            -var="deploy_infrastructure=false" \
+            -var="deploy_vms=false" \
+            -var="deploy_avd=false" \
+            -var="deploy_service_bus=true" \
+            -var="resource_group_name=${{ env.RESOURCE_PREFIX }}-rg-${{ env.ENVIRONMENT }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}"
+          echo "✅ Service Bus deployment completed"
+        elif [ "${{ github.event.inputs.action }}" == "destroy" ]; then
+          echo "🗑️ Destroying Service Bus Infrastructure..."
+          terraform destroy -auto-approve \
+            -var="deploy_infrastructure=false" \
+            -var="deploy_vms=false" \
+            -var="deploy_avd=false" \
+            -var="deploy_service_bus=true" \
+            -var="resource_group_name=${{ env.RESOURCE_PREFIX }}-rg-${{ env.ENVIRONMENT }}" \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}"
+          echo "✅ Service Bus destruction completed"
+        fi
+
+    - name: Upload Service Bus Plan
+      if: github.event.inputs.action == 'plan'
+      uses: actions/upload-artifact@v4
+      with:
+        name: service-bus-terraform-plan
+        path: |
+          ${{ env.TF_WORKING_DIR }}/sbus-plan

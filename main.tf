@@ -1,218 +1,118 @@
-# Main Terraform Configuration
-# This file includes all components for full deployment
+# Main Terraform Configuration - Orchestrator
+# This file serves as the main orchestrator for different deployment components
+# Use feature flags to control which components to deploy
 
-# Infrastructure Components
-# Uncomment the line below to include infrastructure resources
-# terraform {
-#   source = "./infrastructure.tf"
-# }
-
-# VM Resources
-# Uncomment the line below to include VM resources
-# terraform {
-#   source = "./vm-resources.tf"
-# }
-
-# Service Bus Resources  
-# Uncomment the line below to include Service Bus resources
-# terraform {
-#   source = "./service-bus.tf"
-# }
-
-# AVD Resources
-# Uncomment the line below to include AVD resources
-# terraform {
-#   source = "./avd-main.tf"
-# }
-
-# For now, include all components for backward compatibility
-# You can comment out sections you don't want to deploy
-
-# Basic Infrastructure (conditional)
-#resource "azurerm_resource_group" "main" {
-#count    = var.create_resource_group ? 1 : 0
-#name     = var.resource_group_name
-#location = var.location
-
-#tags = {
-#  Environment = var.environment
-#  ManagedBy   = "Terraform"
-#}
-#}
-
-#data "azurerm_resource_group" "existing" {
-#  count = var.create_resource_group ? 0 : 1
-#  name  = var.resource_group_name
-#}
-
-#locals {
-#  resource_group = var.create_resource_group ? azurerm_resource_group.main[0] : data.azurerm_resource_group.existing[0]
-#}
-
-# Virtual Network (only if not using separate infrastructure deployment)
-#resource "azurerm_virtual_network" "main" {
-#  name                = "vnet-${var.environment}"
-#  address_space       = ["10.0.0.0/16"]
-#  location            = var.resource_group.location
-#  resource_group_name = var.resource_group.name
-
-#  tags = {
-#    Environment = var.environment
+# Terraform configuration
+#terraform {
+#  required_version = ">= 1.0"
+#  required_providers {
+#    azurerm = {
+#      source  = "hashicorp/azurerm"
+#      version = "~> 3.0"
+#    }
+#  }
+  
+#  backend "azurerm" {
+    # Backend configuration will be provided via init command
 #  }
 #}
 
-# Subnet
-#resource "azurerm_subnet" "internal" {
-#  name                 = "subnet-${var.pool_type}"
-#  resource_group_name  = var.resource_group.name
-#  virtual_network_name = azurerm_virtual_network.main.name
-#  address_prefixes     = ["10.0.2.0/24"]
+# Configure the Microsoft Azure Provider
+#provider "azurerm" {
+#  features {
+#    resource_group {
+#      prevent_deletion_if_contains_resources = false
+#    }
+#    key_vault {
+#      purge_soft_delete_on_destroy    = true
+#      recover_soft_deleted_key_vaults = true
+#    }
+#  }
 #}
 
-locals {
-  
+# Feature flags to control deployment components
+#variable "deploy_infrastructure" {
+#  description = "Deploy basic infrastructure (RG, VNet, Subnets)"
+#  type        = bool
+#  default     = false
+#}
 
+#variable "deploy_vms" {
+#  description = "Deploy VM resources"
+#  type        = bool
+#  default     = false
+#}
+
+#variable "deploy_avd" {
+#  description = "Deploy AVD resources"
+#  type        = bool
+#  default     = false
+#}
+
+#variable "deploy_service_bus" {
+#  description = "Deploy Service Bus resources"
+#  type        = bool
+#  default     = false
+#}
+
+# Infrastructure Module (conditional)
+module "infrastructure" {
+  count  = var.deploy_infrastructure ? 1 : 0
+  source = "./modules/infrastructure"
+
+  resource_group_name    = local.resource_group_name
+  location              = var.location
+  environment           = var.environment
+  create_resource_group = var.create_resource_group
+  resource_prefix       = var.resource_prefix
+  common_tags           = local.common_tags
 }
 
-# Network Security Group
-resource "azurerm_network_security_group" "main" {
-  name                = "nsg-${var.pool_type}"
-  location            = var.resource_group.location
-  resource_group_name = var.resource_group.name
+# VM Resources Module (conditional)
+module "vm_resources" {
+  count  = var.deploy_vms ? 1 : 0
+  source = "./modules/vm-resources"
 
-  security_rule {
-    name                       = "SSH"
-    priority                   = 1001
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "22"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
-
-  security_rule {
-    name                       = "HTTP"
-    priority                   = 1002
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "80"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
-
-  tags = {
-    Environment = var.environment
-  }
-}
-
-# Public IPs
-resource "azurerm_public_ip" "main" {
-  count               = var.vm_count
-  name                = "pip-${var.pool_type}-${count.index + 1}"
-  resource_group_name = var.resource_group.name
-  location            = var.resource_group.location
-  allocation_method   = "Static"
-  sku                 = "Standard"
-
-  tags = {
-    Environment = var.environment
-  }
-}
-
-# Network Interfaces
-resource "azurerm_network_interface" "main" {
-  count               = var.vm_count
-  name                = "nic-${var.pool_type}-${count.index + 1}"
-  location            = var.resource_group.location
-  resource_group_name = var.resource_group.name
-
-  ip_configuration {
-    name                          = "internal"
-    subnet_id                     = azurerm_subnet.internal.id
-    private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.main[count.index].id
-  }
-
-  tags = {
-    Environment = var.environment
-    PoolType    = var.pool_type
-  }
-}
-
-# Associate Network Security Group to Network Interface
-resource "azurerm_network_interface_security_group_association" "main" {
-  count                     = var.vm_count
-  network_interface_id      = azurerm_network_interface.main[count.index].id
-  network_security_group_id = azurerm_network_security_group.main.id
-}
-
-# Virtual Machines
-resource "azurerm_linux_virtual_machine" "main" {
-  count               = var.vm_count
-  name                = "vm-${var.pool_type}-${count.index + 1}"
-  resource_group_name = var.resource_group.name
-  location            = var.resource_group.location
-  size                = var.vm_size
-  admin_username      = "adminuser"
-
-  disable_password_authentication = true
-
-  network_interface_ids = [
-    azurerm_network_interface.main[count.index].id,
-  ]
-
-  admin_ssh_key {
-    username   = "adminuser"
-    public_key = var.admin_ssh_public_key
-  }
-
-  os_disk {
-    caching              = "ReadWrite"
-    storage_account_type = "Premium_LRS"
-  }
-
-  source_image_reference {
-    publisher = "Canonical"
-    offer     = "0001-com-ubuntu-server-jammy"
-    sku       = "22_04-lts-gen2"
-    version   = "latest"
-  }
-
-  tags = {
-    Environment  = var.environment
-    PoolType     = var.pool_type
-    AutoShutdown = var.auto_shutdown_enabled
-  }
-}
-
-# Auto-shutdown schedule for VMs
-resource "azurerm_dev_test_global_vm_shutdown_schedule" "main" {
-  count              = var.auto_shutdown_enabled ? var.vm_count : 0
-  virtual_machine_id = azurerm_linux_virtual_machine.main[count.index].id
-  location           = var.resource_group.location
-  enabled            = true
-
-  daily_recurrence_time = var.work_hours_end
+  resource_group_name    = local.resource_group_name
+  location              = var.location
+  environment           = var.environment
+  pool_type             = var.pool_type
+  vm_count              = var.vm_count
+  vm_size               = var.vm_size
+  admin_ssh_public_key  = var.admin_ssh_public_key
+  auto_shutdown_enabled = var.auto_shutdown_enabled
+  work_hours_end        = var.work_hours_end
   timezone              = var.timezone
+  resource_prefix       = var.resource_prefix
+  common_tags           = local.common_tags
 
-  notification_settings {
-    enabled = false
-  }
-
-  tags = {
-    Environment = var.environment
-  }
+  depends_on = [module.infrastructure]
 }
 
-# Service Bus Module (optional - comment out if not needed)
-module "sbus" {
+# AVD Resources Module (conditional)
+module "avd_resources" {
+  count  = var.deploy_avd ? 1 : 0
+  source = "./modules/avd"
+
+  resource_group_name = local.resource_group_name
+  location           = var.location
+  environment        = var.environment
+  resource_prefix    = var.resource_prefix
+  common_tags        = local.common_tags
+
+  depends_on = [module.infrastructure]
+}
+
+# Service Bus Module (conditional)
+module "service_bus" {
+  count  = var.deploy_service_bus ? 1 : 0
   source = "./modules/sbus"
 
-  resource_group_name = var.resource_group.name
-  location            = var.resource_group.location
-  environment         = var.environment
+  resource_group_name = local.resource_group_name
+  location           = var.location
+  environment        = var.environment
+  resource_prefix    = var.resource_prefix
+  common_tags        = local.common_tags
+
+  depends_on = [module.infrastructure]
 }

@@ -72,44 +72,134 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Setup Terraform Backend for Infrastructure
+      run: |
+        echo "Creating Infrastructure Terraform state storage..."
+        
+        # Set variables from workflow inputs
+        RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+        ENVIRONMENT="${{ github.event.inputs.environment }}"
+        LOCATION="${{ github.event.inputs.location }}"
+        
+        # Backend naming convention
+        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
+        BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
+        BACKEND_CONTAINER_NAME="${RESOURCE_PREFIX}tfstateinfra${ENVIRONMENT}"
+        BACKEND_KEY="terraforminfra.tfstate"
+        
+        echo "Backend Configuration:"
+        echo "Resource Group: $BACKEND_RG_NAME"
+        echo "Storage Account: $BACKEND_STORAGE_NAME"
+        echo "Container: $BACKEND_CONTAINER_NAME"
+        echo "Key: $BACKEND_KEY"
+        
+        # Create backend resource group
+        az group create --name "$BACKEND_RG_NAME" --location "$LOCATION" --output none || true
+        
+        # Create backend storage account
+        az storage account create \
+          --name "$BACKEND_STORAGE_NAME" \
+          --resource-group "$BACKEND_RG_NAME" \
+          --location "$LOCATION" \
+          --sku Standard_LRS \
+          --kind StorageV2 \
+          --allow-blob-public-access false \
+          --tags owner=$RESOURCE_PREFIX createdBy=terraform component=backend \
+          --output none || true
+
+        # Enable versioning
+        az storage account blob-service-properties update \
+          --resource-group "$BACKEND_RG_NAME" \
+          --account-name "$BACKEND_STORAGE_NAME" \
+          --enable-versioning true
+        
+        # Create container for Infrastructure state
+        az storage container create \
+          --name "$BACKEND_CONTAINER_NAME" \
+          --account-name "$BACKEND_STORAGE_NAME" \
+          --auth-mode login \
+          --output none || true
+        
+        # Setup RBAC for service principal
+        SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
+        SA_ID="$(az storage account show -g "$BACKEND_RG_NAME" -n "$BACKEND_STORAGE_NAME" --query id -o tsv)"
+
+        if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
+          --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
+          az role assignment create \
+            --assignee-object-id "$SP_OBJ_ID" \
+            --assignee-principal-type ServicePrincipal \
+            --role "Storage Blob Data Contributor" \
+            --scope "$SA_ID" \
+            --output none
+          sleep 5
+        fi
+        
+        # Export for next steps
+        echo "BACKEND_RG_NAME=$BACKEND_RG_NAME" >> $GITHUB_ENV
+        echo "BACKEND_STORAGE_NAME=$BACKEND_STORAGE_NAME" >> $GITHUB_ENV
+        echo "BACKEND_CONTAINER_NAME=$BACKEND_CONTAINER_NAME" >> $GITHUB_ENV
+        echo "BACKEND_KEY=$BACKEND_KEY" >> $GITHUB_ENV
+
     - name: Terraform Init
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
-          -backend-config="storage_account_name=${{ github.event.inputs.resource_prefix }}infratfstates" \
-          -backend-config="resource_group_name=${{ github.event.inputs.resource_prefix }}-infra-tfstate-rg" \
-          -backend-config="container_name=infrastructure-tfstate" \
-          -backend-config="key=infrastructure.tfstate" \
+          -backend-config="resource_group_name=${{ env.BACKEND_RG_NAME }}" \
+          -backend-config="storage_account_name=${{ env.BACKEND_STORAGE_NAME }}" \
+          -backend-config="container_name=${{ env.BACKEND_CONTAINER_NAME }}" \
+          -backend-config="key=${{ env.BACKEND_KEY }}" \
           -backend-config="use_azuread_auth=true"
 
     - name: Terraform Plan/Apply/Destroy
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
+        # Calculate due date (current date + 5 days)
+        DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
+        
         if [ "${{ github.event.inputs.action }}" == "plan" ]; then
+          echo "🔍 Planning Infrastructure Deployment..."
           terraform plan \
-            -target=azurerm_resource_group.main \
-            -target=azurerm_virtual_network.main \
-            -target=azurerm_subnet.vm_subnet \
-            -target=azurerm_subnet.services_subnet \
+            -var="deploy_infrastructure=true" \
+            -var="deploy_vms=false" \
+            -var="deploy_avd=false" \
+            -var="deploy_service_bus=false" \
+            -var="resource_prefix=${{ github.event.inputs.resource_prefix }}" \
             -var="environment=${{ github.event.inputs.environment }}" \
             -var="location=${{ github.event.inputs.location }}" \
-            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}"
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}" \
+            -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -var="due_date=$DUE_DATE" \
+            -out=infra-plan
         elif [ "${{ github.event.inputs.action }}" == "apply" ]; then
+          echo "🚀 Applying Infrastructure Deployment..."
           terraform apply -auto-approve \
-            -target=azurerm_resource_group.main \
-            -target=azurerm_virtual_network.main \
-            -target=azurerm_subnet.vm_subnet \
-            -target=azurerm_subnet.services_subnet \
+            -var="deploy_infrastructure=true" \
+            -var="deploy_vms=false" \
+            -var="deploy_avd=false" \
+            -var="deploy_service_bus=false" \
+            -var="resource_prefix=${{ github.event.inputs.resource_prefix }}" \
             -var="environment=${{ github.event.inputs.environment }}" \
             -var="location=${{ github.event.inputs.location }}" \
-            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}"
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}" \
+            -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -var="due_date=$DUE_DATE"
+          echo "✅ Infrastructure deployment completed"
         elif [ "${{ github.event.inputs.action }}" == "destroy" ]; then
+          echo "🗑️ Destroying Infrastructure..."
           terraform destroy -auto-approve \
-            -target=azurerm_subnet.services_subnet \
-            -target=azurerm_subnet.vm_subnet \
-            -target=azurerm_virtual_network.main \
-            -target=azurerm_resource_group.main \
+            -var="deploy_infrastructure=true" \
+            -var="deploy_vms=false" \
+            -var="deploy_avd=false" \
+            -var="deploy_service_bus=false" \
+            -var="resource_prefix=${{ github.event.inputs.resource_prefix }}" \
             -var="environment=${{ github.event.inputs.environment }}" \
             -var="location=${{ github.event.inputs.location }}" \
-            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}"
+            -var="create_resource_group=${{ github.event.inputs.create_resource_group }}" \
+            -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+            -var="due_date=$DUE_DATE"
+          echo "✅ Infrastructure destruction completed"
         fi

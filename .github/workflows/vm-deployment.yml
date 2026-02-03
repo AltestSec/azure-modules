@@ -127,58 +127,65 @@ jobs:
         # Set resource prefix from input or default
         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
           RESOURCE_PREFIX="${{ github.event.inputs.resource_prefix }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          LOCATION="${{ github.event.inputs.location }}"
           DUE_DATE="${{ github.event.inputs.due_date }}"
         else
           RESOURCE_PREFIX="omerzlikin"
-          DUE_DATE="2026-02-12"
+          ENVIRONMENT="dev"
+          LOCATION="westeurope"
+          DUE_DATE=$(date -d "+5 days" +%Y-%m-%d)
         fi
         
-        LOCATION="${{ github.event.inputs.location }}"
-        # Use consistent storage account naming (without timestamp to ensure consistency across jobs)
-        STORAGE_NAME="${RESOURCE_PREFIX}tfstates"
-        RG_NAME="${RESOURCE_PREFIX}-tfstate-rg"
+        # Backend naming convention for VMs
+        BACKEND_RG_NAME="${RESOURCE_PREFIX}-tfresources-rg"
+        BACKEND_STORAGE_NAME="${RESOURCE_PREFIX}tfstatestorage"
+        BACKEND_CONTAINER_NAME="${RESOURCE_PREFIX}tfstatevm${ENVIRONMENT}"
+        BACKEND_KEY="terraformvm.tfstate"
         
-        echo "Creating Terraform state storage with prefix: $RESOURCE_PREFIX"
-        echo "Storage account: $STORAGE_NAME"
-        echo "Resource group: $RG_NAME"
+        echo "Creating VM Terraform state storage with prefix: $RESOURCE_PREFIX"
+        echo "Backend Resource Group: $BACKEND_RG_NAME"
+        echo "Backend Storage Account: $BACKEND_STORAGE_NAME"
+        echo "Backend Container: $BACKEND_CONTAINER_NAME"
+        echo "Backend Key: $BACKEND_KEY"
         echo "Due date: $DUE_DATE"
         
-        # Create resource group for Terraform state
-        az group create --name "$RG_NAME" --location "$LOCATION" --output none || true
+        # Create resource group for Terraform state (reuse infrastructure backend)
+        az group create --name "$BACKEND_RG_NAME" --location "$LOCATION" --output none || true
         
-        # Create storage account with versioning and RBAC
+        # Create storage account with versioning and RBAC (reuse infrastructure backend)
         az storage account create \
-          --name "$STORAGE_NAME" \
-          --resource-group "$RG_NAME" \
+          --name "$BACKEND_STORAGE_NAME" \
+          --resource-group "$BACKEND_RG_NAME" \
           --location "$LOCATION" \
           --sku Standard_LRS \
           --kind StorageV2 \
           --allow-blob-public-access false \
-          --tags owner=${RESOURCE_PREFIX} createdBy=terraform dueDate="$DUE_DATE" \
+          --tags owner=${RESOURCE_PREFIX} createdBy=terraform component=backend \
           --output none || true
 
         az storage account blob-service-properties update \
-          --resource-group "$RG_NAME" \
-          --account-name "$STORAGE_NAME" \
+          --resource-group "$BACKEND_RG_NAME" \
+          --account-name "$BACKEND_STORAGE_NAME" \
           --enable-versioning true
         
-        # Create container for Terraform state
+        # Create container for VM Terraform state
         az storage container create \
-          --name "${STORAGE_NAME}-${{ github.event.inputs.environment || 'dev' }}" \
-          --account-name "$STORAGE_NAME" \
+          --name "$BACKEND_CONTAINER_NAME" \
+          --account-name "$BACKEND_STORAGE_NAME" \
           --auth-mode login \
           --output none || true
         
         # Get current user/service principal object ID
         # Assign Storage Blob Data Contributor role for RBAC access
         SP_OBJ_ID="$(az ad sp show --id "${ARM_CLIENT_ID}" --query id -o tsv)"
-        SA_ID="$(az storage account show -g "$RG_NAME" -n "$STORAGE_NAME" --query id -o tsv)"
+        SA_ID="$(az storage account show -g "$BACKEND_RG_NAME" -n "$BACKEND_STORAGE_NAME" --query id -o tsv)"
 
         # create only if missing
         if ! az role assignment list --assignee "$SP_OBJ_ID" --scope "$SA_ID" \
           --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" -o tsv | grep -qx 1; then
           for i in {1..30}; do
-            echo "Attempt Assign Blob Storage Contributor  set ($i/30)..."
+            echo "Attempt Assign Blob Storage Contributor set ($i/30)..."
             az role assignment create \
               --assignee-object-id "$SP_OBJ_ID" \
               --assignee-principal-type ServicePrincipal \
@@ -188,17 +195,11 @@ jobs:
             sleep 5
           done
         fi
-
-        #echo "Setting ACL for Terraform SP..."
-        # az storage fs access set \
-        #   --account-name "$STORAGE_NAME" \
-        #   --file-system tfstate \
-        #   --path "/" \
-        #   --acl "user:${SP_OBJ_ID}:rwx,default:user:${SP_OBJ_ID}:rwx" \
-        #   --auth-mode login
         
-        echo "STORAGE_ACCOUNT_NAME=$STORAGE_NAME" >> $GITHUB_ENV
-        echo "TFSTATE_RG_NAME=$RG_NAME" >> $GITHUB_ENV
+        echo "BACKEND_RG_NAME=$BACKEND_RG_NAME" >> $GITHUB_ENV
+        echo "BACKEND_STORAGE_NAME=$BACKEND_STORAGE_NAME" >> $GITHUB_ENV
+        echo "BACKEND_CONTAINER_NAME=$BACKEND_CONTAINER_NAME" >> $GITHUB_ENV
+        echo "BACKEND_KEY=$BACKEND_KEY" >> $GITHUB_ENV
         echo "RESOURCE_PREFIX=$RESOURCE_PREFIX" >> $GITHUB_ENV
         echo "DUE_DATE=$DUE_DATE" >> $GITHUB_ENV
 
@@ -392,10 +393,10 @@ jobs:
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
-          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
-          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ github.event.inputs.environment || 'dev' }}" \
-          -backend-config="key=terraform.tfstate" \
+          -backend-config="resource_group_name=${{ env.BACKEND_RG_NAME }}" \
+          -backend-config="storage_account_name=${{ env.BACKEND_STORAGE_NAME }}" \
+          -backend-config="container_name=${{ env.BACKEND_CONTAINER_NAME }}" \
+          -backend-config="key=${{ env.BACKEND_KEY }}" \
           -backend-config="use_azuread_auth=true"
 
     - name: Terraform Validate
@@ -526,10 +527,10 @@ jobs:
       working-directory: ${{ env.TF_WORKING_DIR }}
       run: |
         terraform init \
-          -backend-config="storage_account_name=${{ env.STORAGE_ACCOUNT_NAME }}" \
-          -backend-config="resource_group_name=${{ env.TFSTATE_RG_NAME }}" \
-          -backend-config="container_name=${{ env.STORAGE_ACCOUNT_NAME }}-${{ env.ENVIRONMENT }}" \
-          -backend-config="key=terraform.tfstate" \
+          -backend-config="resource_group_name=${{ env.BACKEND_RG_NAME }}" \
+          -backend-config="storage_account_name=${{ env.BACKEND_STORAGE_NAME }}" \
+          -backend-config="container_name=${{ env.BACKEND_CONTAINER_NAME }}" \
+          -backend-config="key=${{ env.BACKEND_KEY }}" \
           -backend-config="use_azuread_auth=true"
 
     - name: Terraform Plan
@@ -539,12 +540,11 @@ jobs:
         echo "=================================="
     
         terraform plan \
-          -target=azurerm_network_security_group.vm_nsg \
-          -target=azurerm_public_ip.vm_pip \
-          -target=azurerm_network_interface.vm_nic \
-          -target=azurerm_network_interface_security_group_association.vm_nsg_association \
-          -target=azurerm_linux_virtual_machine.vm \
-          -target=azurerm_dev_test_global_vm_shutdown_schedule.vm_shutdown \
+          -var="deploy_infrastructure=false" \
+          -var="deploy_vms=true" \
+          -var="deploy_avd=false" \
+          -var="deploy_service_bus=false" \
+          -var="resource_prefix=${{ env.RESOURCE_PREFIX }}" \
           -var="location=${{ env.LOCATION }}" \
           -var="pool_type=${{ env.POOL_TYPE }}" \
           -var="vm_count=${{ env.VM_COUNT }}" \
@@ -553,6 +553,7 @@ jobs:
           -var="admin_ssh_public_key=${{ env.SSH_PUBLIC_KEY }}" \
           -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
           -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+          -var="due_date=${{ env.DUE_DATE }}" \
           -var="create_resource_group=false" \
           -detailed-exitcode \
           -out=tfplan
@@ -758,12 +759,20 @@ jobs:
         echo "Resource prefix: ${{ env.RESOURCE_PREFIX }}"
         echo "Due date: ${{ env.DUE_DATE }}"
         terraform apply -auto-approve \
-          -target=azurerm_network_security_group.vm_nsg \
-          -target=azurerm_public_ip.vm_pip \
-          -target=azurerm_network_interface.vm_nic \
-          -target=azurerm_network_interface_security_group_association.vm_nsg_association \
-          -target=azurerm_linux_virtual_machine.vm \
-          -target=azurerm_dev_test_global_vm_shutdown_schedule.vm_shutdown \
+          -var="deploy_infrastructure=false" \
+          -var="deploy_vms=true" \
+          -var="deploy_avd=false" \
+          -var="deploy_service_bus=false" \
+          -var="resource_group_name=${{ env.RESOURCE_PREFIX }}-rg-${{ env.ENVIRONMENT }}" \
+          -var="location=${{ env.LOCATION }}" \
+          -var="pool_type=${{ env.POOL_TYPE }}" \
+          -var="vm_count=${{ env.VM_COUNT }}" \
+          -var="vm_size=${{ env.VM_SIZE }}" \
+          -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="admin_ssh_public_key=${{ env.SSH_PUBLIC_KEY }}" \
+          -var="subscription_id=${{ env.ARM_SUBSCRIPTION_ID }}" \
+          -var="tenant_id=${{ env.ARM_TENANT_ID }}" \
+          -var="create_resource_group=false" \
           tfplan
         echo "✅ VM Infrastructure deployment completed"
 
