@@ -6,6 +6,11 @@ on:
       - az_payground/**
     paths:
       - '.github/workflows/infrastructure-deployment.yml'
+  pull_request:
+    branches:
+      - az_payground/**
+    paths:
+      - '.github/workflows/infrastructure-deployment.yml'
   workflow_dispatch:
     inputs:
       environment:
