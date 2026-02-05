@@ -130,7 +130,7 @@ jobs:
         echo "Backend Key: $BACKEND_KEY (COMPONENT-SPECIFIC)"
         
         # Create ONE backend resource group for all components
-        az group create --name "$BACKEND_RG_NAME" --location "$LOCATION" --tags owner=$RESOURCE_PREFIX createdBy=terraform component=shared-rg dueDate="$DUE_DATE"  --output none || true
+        az group create --name "$BACKEND_RG_NAME" --location "$LOCATION" --tags owner="oleksandr.merzlikin@nixs.com" scope="tf-opus" createdwith=terraform component=shared-rg duedate="$DUE_DATE"  --output none || true
         
         # Create ONE backend storage account for all components
         az storage account create \
@@ -140,7 +140,6 @@ jobs:
           --sku Standard_LRS \
           --kind StorageV2 \
           --allow-blob-public-access false \
-          --tags owner=$RESOURCE_PREFIX createdBy=terraform component=shared-backend dueDate="$DUE_DATE" \
           --output none || true
 
         # Enable versioning
